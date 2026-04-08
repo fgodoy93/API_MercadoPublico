@@ -1,0 +1,24 @@
+# Dependencias
+node_modules/
+API_MercadoPublico/backend/node_modules/
+API_MercadoPublico/frontend/node_modules/
+
+# Variables de entorno (contienen credenciales)
+.env
+API_MercadoPublico/backend/.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# Build
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

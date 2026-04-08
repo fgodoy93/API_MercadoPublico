@@ -1,5 +1,6 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { query } from '../db/database.js';
 
 dotenv.config();
 
@@ -7,48 +8,57 @@ const API_URL = process.env.MERCADO_PUBLICO_API_URL;
 const TICKET = process.env.MERCADO_PUBLICO_TICKET;
 
 const axiosInstance = axios.create({
-  timeout: 60000,
-  headers: {
-    'Accept': 'application/json'
-  }
+  timeout: 90000,
+  headers: { 'Accept': 'application/json' }
 });
+
+// Cache en memoria para listados (TTL: 5 minutos)
+const listadoCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000;
+
+function getCacheKey(estado, fecha) {
+  return `${estado || 'todos'}_${fecha || 'hoy'}`;
+}
+
+function getListadoFromCache(key) {
+  const entry = listadoCache.get(key);
+  if (entry && Date.now() - entry.timestamp < CACHE_TTL) {
+    return entry.data;
+  }
+  listadoCache.delete(key);
+  return null;
+}
+
+function setListadoCache(key, data) {
+  listadoCache.set(key, { data, timestamp: Date.now() });
+}
 
 const formatDate = (date) => {
   const d = new Date(date);
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  return `${day}${month}${year}`;
+  return `${String(d.getDate()).padStart(2, '0')}${String(d.getMonth() + 1).padStart(2, '0')}${d.getFullYear()}`;
 };
 
-const formatDateToday = () => {
-  return formatDate(new Date());
-};
+const formatDateToday = () => formatDate(new Date());
 
-// Normaliza una licitación del listado (campos mínimos) a un formato consistente
-function normalizarLicitacionListado(item) {
-  return {
-    CodigoExterno: item.CodigoExterno,
-    Nombre: item.Nombre,
-    CodigoEstado: item.CodigoEstado,
-    FechaCierre: item.FechaCierre,
-    Estado: getDescripcionEstado(String(item.CodigoEstado))
+function getDescripcionEstado(codigo) {
+  const estados = {
+    '5': 'Publicada', '6': 'Cerrada', '7': 'Desierta',
+    '8': 'Adjudicada', '18': 'Revocada', '19': 'Suspendida'
   };
+  return estados[String(codigo)] || 'Desconocido';
 }
 
-// Normaliza una licitación del detalle (campos completos) a un formato plano
-function normalizarLicitacionDetalle(item) {
+function normalizarDetalle(item) {
   return {
     CodigoExterno: item.CodigoExterno,
     Nombre: item.Nombre,
     CodigoEstado: item.CodigoEstado,
-    Estado: item.Estado || getDescripcionEstado(String(item.CodigoEstado)),
+    Estado: item.Estado || getDescripcionEstado(item.CodigoEstado),
     Descripcion: item.Descripcion || '',
     FechaCierre: item.FechaCierre || item.Fechas?.FechaCierre,
     NombreOrganismo: item.Comprador?.NombreOrganismo || '',
-    RegionUnidad: item.Comprador?.RegionUnidad?.trim() || '',
+    RegionUnidad: (item.Comprador?.RegionUnidad || '').trim(),
     ComunaUnidad: item.Comprador?.ComunaUnidad || '',
-    RutUnidad: item.Comprador?.RutUnidad || '',
     NombreUnidad: item.Comprador?.NombreUnidad || '',
     Tipo: item.Tipo || '',
     CodigoTipo: item.CodigoTipo,
@@ -56,188 +66,197 @@ function normalizarLicitacionDetalle(item) {
     MontoEstimado: item.MontoEstimado || 0,
     FechaPublicacion: item.Fechas?.FechaPublicacion || '',
     FechaCreacion: item.Fechas?.FechaCreacion || '',
-    FechaAdjudicacion: item.Fechas?.FechaAdjudicacion || '',
     FechaInicio: item.Fechas?.FechaInicio || '',
     FechaFinal: item.Fechas?.FechaFinal || '',
     Etapas: item.Etapas,
-    CantidadReclamos: item.CantidadReclamos || 0,
-    Items: item.Items || [],
-    // Datos completos originales por si se necesitan
-    _detalleCargado: true
+    Items: item.Items || []
   };
 }
 
-function getDescripcionEstado(codigo) {
-  const estados = {
-    '5': 'Publicada',
-    '6': 'Cerrada',
-    '7': 'Desierta',
-    '8': 'Adjudicada',
-    '18': 'Revocada',
-    '19': 'Suspendida'
+function normalizarListado(item) {
+  return {
+    CodigoExterno: item.CodigoExterno,
+    Nombre: item.Nombre,
+    CodigoEstado: item.CodigoEstado,
+    Estado: getDescripcionEstado(item.CodigoEstado),
+    FechaCierre: item.FechaCierre
   };
-  return estados[codigo] || 'Desconocido';
+}
+
+// Guarda detalle en cache PostgreSQL
+async function guardarEnCache(detalle) {
+  try {
+    await query(
+      `INSERT INTO cache_licitaciones (codigo_externo, datos, region, nombre_organismo, monto_estimado, tipo, fecha_cache)
+       VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+       ON CONFLICT (codigo_externo) DO UPDATE SET
+         datos = EXCLUDED.datos,
+         region = EXCLUDED.region,
+         nombre_organismo = EXCLUDED.nombre_organismo,
+         monto_estimado = EXCLUDED.monto_estimado,
+         tipo = EXCLUDED.tipo,
+         fecha_cache = CURRENT_TIMESTAMP`,
+      [
+        detalle.CodigoExterno,
+        JSON.stringify(detalle),
+        detalle.RegionUnidad,
+        detalle.NombreOrganismo,
+        detalle.MontoEstimado,
+        detalle.Tipo
+      ]
+    );
+  } catch (error) {
+    // Silencioso - cache es optional
+  }
+}
+
+// Busca en cache PostgreSQL
+async function buscarEnCache(codigos) {
+  try {
+    const result = await query(
+      `SELECT codigo_externo, datos FROM cache_licitaciones
+       WHERE codigo_externo = ANY($1)`,
+      [codigos]
+    );
+    const cache = {};
+    for (const row of result.rows) {
+      cache[row.codigo_externo] = typeof row.datos === 'string' ? JSON.parse(row.datos) : row.datos;
+    }
+    return cache;
+  } catch (error) {
+    return {};
+  }
+}
+
+// Filtra por regiones desde el cache
+async function filtrarPorRegionDesdeCache(codigos, regiones) {
+  try {
+    const regionesPattern = regiones.map(r => `%${r}%`);
+    const placeholders = regionesPattern.map((_, i) => `$${i + 1}`).join(' OR region ILIKE ');
+
+    const result = await query(
+      `SELECT codigo_externo, datos FROM cache_licitaciones
+       WHERE codigo_externo = ANY($${regionesPattern.length + 1})
+       AND (region ILIKE ${placeholders})
+       ORDER BY fecha_cache DESC
+       LIMIT 50`,
+      [...regionesPattern, codigos]
+    );
+
+    return result.rows.map(row =>
+      typeof row.datos === 'string' ? JSON.parse(row.datos) : row.datos
+    );
+  } catch (error) {
+    console.error('Error filtro cache:', error.message);
+    return [];
+  }
 }
 
 export const mercadoPublicoService = {
-  // Obtener detalle de licitación por código (devuelve datos completos)
+  // Detalle completo de una licitación (y la cachea)
   async getLicitacionPorCodigo(codigo) {
-    try {
-      const url = `${API_URL}/licitaciones.json`;
-      const response = await axiosInstance.get(url, {
-        params: { codigo, ticket: TICKET }
-      });
-      const listado = response.data?.Listado || [];
-      if (listado.length > 0) {
+    // Primero buscar en cache
+    const cache = await buscarEnCache([codigo]);
+    if (cache[codigo]) {
+      return { Cantidad: 1, Listado: [cache[codigo]], FromCache: true };
+    }
+
+    // Si no está en cache, ir a la API
+    const response = await axiosInstance.get(`${API_URL}/licitaciones.json`, {
+      params: { codigo, ticket: TICKET }
+    });
+    const listado = response.data?.Listado || [];
+    if (listado.length > 0) {
+      const detalle = normalizarDetalle(listado[0]);
+      // Guardar en cache (fire and forget)
+      guardarEnCache(detalle);
+      return { Cantidad: 1, Listado: [detalle] };
+    }
+    return { Cantidad: 0, Listado: [] };
+  },
+
+  // Listado básico con cache en memoria (5 min TTL)
+  async getListado(estado, fecha) {
+    const cacheKey = getCacheKey(estado, fecha);
+    const cached = getListadoFromCache(cacheKey);
+    if (cached) {
+      console.log(`Listado desde cache: ${cacheKey} (${cached.length} items)`);
+      return cached;
+    }
+
+    const params = { ticket: TICKET };
+
+    if (estado && estado !== 'todos') {
+      const estadoMap = {
+        'publicada': 'publicada', 'cerrada': 'cerrada', 'desierta': 'desierta',
+        'adjudicada': 'adjudicada', 'revocada': 'revocada', 'suspendida': 'suspendida'
+      };
+      params.estado = estadoMap[estado] || estado;
+    }
+
+    params.fecha = fecha ? formatDate(new Date(fecha)) : formatDateToday();
+
+    console.log(`Listado desde API: ${cacheKey}...`);
+    const response = await axiosInstance.get(`${API_URL}/licitaciones.json`, { params });
+    const listado = (response.data?.Listado || []).map(normalizarListado);
+    setListadoCache(cacheKey, listado);
+    console.log(`Listado cacheado: ${cacheKey} (${listado.length} items)`);
+    return listado;
+  },
+
+  // BÚSQUEDA: listado rápido + enriquecimiento desde cache
+  async buscar({ estado, fecha, regiones, pagina = 1, porPagina = 30 } = {}) {
+    // Paso 1: Obtener listado básico (rápido, <5 seg)
+    const listadoBasico = await this.getListado(estado, fecha);
+    const totalBasico = listadoBasico.length;
+
+    if (totalBasico === 0) {
+      return { Cantidad: 0, Total: 0, Pagina: pagina, Listado: [] };
+    }
+
+    // Paso 2: Paginar
+    const inicio = (pagina - 1) * porPagina;
+    const paginaItems = listadoBasico.slice(inicio, inicio + porPagina);
+    const codigos = paginaItems.map(l => l.CodigoExterno);
+
+    // Paso 3: Enriquecer desde cache (instantáneo, sin llamadas a API)
+    const cache = await buscarEnCache(codigos);
+    const resultado = paginaItems.map(basico => cache[basico.CodigoExterno] || basico);
+
+    // Paso 4: Si filtro de regiones, filtrar los enriquecidos
+    if (regiones && regiones.length > 0) {
+      // Buscar por región en TODO el cache (no solo la página actual)
+      const todosCodigos = listadoBasico.map(l => l.CodigoExterno);
+      const filtrados = await filtrarPorRegionDesdeCache(todosCodigos, regiones);
+
+      if (filtrados.length > 0) {
         return {
-          Cantidad: 1,
-          Listado: [normalizarLicitacionDetalle(listado[0])]
+          Cantidad: filtrados.length,
+          Total: filtrados.length,
+          Pagina: 1,
+          PorPagina: porPagina,
+          Listado: filtrados.slice(0, porPagina)
         };
       }
-      return { Cantidad: 0, Listado: [] };
-    } catch (error) {
-      console.error('Error obteniendo licitación por código:', error.message);
-      throw error;
-    }
-  },
 
-  // Obtener licitaciones por fecha (devuelve listado básico)
-  async getLicitacionesPorFecha(fecha) {
-    try {
-      const url = `${API_URL}/licitaciones.json`;
-      const fechaFormato = formatDate(new Date(fecha));
-      const response = await axiosInstance.get(url, {
-        params: { fecha: fechaFormato, ticket: TICKET }
-      });
-      const listado = (response.data?.Listado || []).map(normalizarLicitacionListado);
-      return { Cantidad: listado.length, Listado: listado };
-    } catch (error) {
-      console.error('Error obteniendo licitaciones por fecha:', error.message);
-      throw error;
-    }
-  },
-
-  // Obtener licitaciones de hoy (reemplaza "activas" que hace timeout)
-  async getLicitacionesHoy() {
-    try {
-      const url = `${API_URL}/licitaciones.json`;
-      const response = await axiosInstance.get(url, {
-        params: { fecha: formatDateToday(), ticket: TICKET }
-      });
-      const listado = (response.data?.Listado || []).map(normalizarLicitacionListado);
-      return { Cantidad: listado.length, Listado: listado };
-    } catch (error) {
-      console.error('Error obteniendo licitaciones de hoy:', error.message);
-      throw error;
-    }
-  },
-
-  // Obtener licitaciones por estado y fecha
-  async getLicitacionesPorEstado(estado, fecha = null) {
-    try {
-      const url = `${API_URL}/licitaciones.json`;
-      const params = { ticket: TICKET };
-
-      // Mapear nombres legibles a códigos de la API
-      const estadoMap = {
-        'publicada': 'publicada',
-        'cerrada': 'cerrada',
-        'desierta': 'desierta',
-        'adjudicada': 'adjudicada',
-        'revocada': 'revocada',
-        'suspendida': 'suspendida',
-        'activas': 'activas',
-        '5': 'publicada',
-        '6': 'cerrada',
-        '7': 'desierta',
-        '8': 'adjudicada',
-        '18': 'revocada',
-        '19': 'suspendida'
+      // Si no hay nada en cache, devolver el listado básico con una nota
+      return {
+        Cantidad: resultado.length,
+        Total: totalBasico,
+        Pagina: pagina,
+        PorPagina: porPagina,
+        Listado: resultado,
+        RegionSinCache: true
       };
-
-      params.estado = estadoMap[estado] || estado;
-
-      if (fecha) {
-        params.fecha = formatDate(new Date(fecha));
-      } else {
-        // Si no se pasa fecha, usar hoy para evitar timeouts
-        params.fecha = formatDateToday();
-      }
-
-      const response = await axiosInstance.get(url, { params });
-      const listado = (response.data?.Listado || []).map(normalizarLicitacionListado);
-      return { Cantidad: listado.length, Listado: listado };
-    } catch (error) {
-      console.error('Error obteniendo licitaciones por estado:', error.message);
-      throw error;
     }
-  },
 
-  // Obtener detalles completos de múltiples licitaciones (en lotes)
-  async enriquecerLicitaciones(codigos) {
-    const resultados = [];
-    // Procesar en lotes de 5 para no saturar la API
-    const batchSize = 5;
-    for (let i = 0; i < codigos.length; i += batchSize) {
-      const batch = codigos.slice(i, i + batchSize);
-      const promesas = batch.map(async (codigo) => {
-        try {
-          const url = `${API_URL}/licitaciones.json`;
-          const response = await axiosInstance.get(url, {
-            params: { codigo, ticket: TICKET }
-          });
-          const listado = response.data?.Listado || [];
-          if (listado.length > 0) {
-            return normalizarLicitacionDetalle(listado[0]);
-          }
-          return null;
-        } catch (error) {
-          console.error(`Error obteniendo detalle de ${codigo}:`, error.message);
-          return null;
-        }
-      });
-      const batchResults = await Promise.all(promesas);
-      resultados.push(...batchResults.filter(Boolean));
-    }
-    return resultados;
-  },
-
-  // Buscar licitaciones con filtros combinados
-  async buscarLicitaciones({ estado, fecha, regiones } = {}) {
-    try {
-      let listado;
-
-      if (estado && estado !== 'todos') {
-        const data = await this.getLicitacionesPorEstado(estado, fecha);
-        listado = data.Listado;
-      } else if (fecha) {
-        const data = await this.getLicitacionesPorFecha(fecha);
-        listado = data.Listado;
-      } else {
-        const data = await this.getLicitacionesHoy();
-        listado = data.Listado;
-      }
-
-      // Si hay filtro de regiones, necesitamos los detalles completos
-      if (regiones && regiones.length > 0) {
-        const codigos = listado.map(l => l.CodigoExterno);
-        // Enriquecer solo los primeros 50 para performance
-        const codigosLimitados = codigos.slice(0, 50);
-        const detalles = await this.enriquecerLicitaciones(codigosLimitados);
-
-        // Filtrar por regiones
-        const regionesLower = regiones.map(r => r.toLowerCase().trim());
-        listado = detalles.filter(d => {
-          const regionLic = (d.RegionUnidad || '').toLowerCase().trim();
-          return regionesLower.some(r => regionLic.includes(r) || r.includes(regionLic));
-        });
-      }
-
-      return { Cantidad: listado.length, Listado: listado };
-    } catch (error) {
-      console.error('Error en búsqueda:', error.message);
-      throw error;
-    }
+    return {
+      Cantidad: resultado.length,
+      Total: totalBasico,
+      Pagina: pagina,
+      PorPagina: porPagina,
+      Listado: resultado
+    };
   },
 
   getDescripcionEstado

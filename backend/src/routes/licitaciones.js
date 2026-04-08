@@ -4,16 +4,18 @@ import { query } from '../db/database.js';
 
 const router = express.Router();
 
-// Búsqueda con filtros combinados (estado, fecha, regiones)
+// Búsqueda principal (listado rápido + cache)
 router.get('/buscar', async (req, res) => {
   try {
-    const { estado, fecha, regiones } = req.query;
+    const { estado, fecha, regiones, pagina = '1', porPagina = '30' } = req.query;
     const regionesArray = regiones ? regiones.split(',').map(r => r.trim()).filter(Boolean) : [];
 
-    const data = await mercadoPublicoService.buscarLicitaciones({
+    const data = await mercadoPublicoService.buscar({
       estado: estado || null,
       fecha: fecha || null,
-      regiones: regionesArray
+      regiones: regionesArray,
+      pagina: parseInt(pagina),
+      porPagina: parseInt(porPagina)
     });
     res.json(data);
   } catch (error) {
@@ -22,62 +24,42 @@ router.get('/buscar', async (req, res) => {
   }
 });
 
-// Obtener licitación por código (detalle completo)
+// Listado rápido de hoy (sin enriquecimiento)
+router.get('/hoy', async (req, res) => {
+  try {
+    const listado = await mercadoPublicoService.getListado(null, null);
+    res.json({ Cantidad: listado.length, Listado: listado });
+  } catch (error) {
+    console.error('Error hoy:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Detalle completo de una licitación (con cache)
 router.get('/codigo/:codigo', async (req, res) => {
   try {
     const { codigo } = req.params;
     const data = await mercadoPublicoService.getLicitacionPorCodigo(codigo);
     res.json(data);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error detalle:', error.message);
+    res.status(500).json({ error: 'Error obteniendo detalle. La API de Mercado Público puede estar lenta.' });
   }
 });
 
-// Obtener licitaciones del día actual
-router.get('/hoy', async (req, res) => {
+// Estadísticas del cache
+router.get('/cache/stats', async (req, res) => {
   try {
-    const data = await mercadoPublicoService.getLicitacionesHoy();
-    res.json(data);
+    const result = await query(
+      `SELECT COUNT(*) as total,
+              COUNT(DISTINCT region) as regiones,
+              MIN(fecha_cache) as primera,
+              MAX(fecha_cache) as ultima
+       FROM cache_licitaciones`
+    );
+    res.json(result.rows[0]);
   } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Obtener licitaciones por estado
-router.get('/estado/:estado', async (req, res) => {
-  try {
-    const { estado } = req.params;
-    const { fecha } = req.query;
-    const data = await mercadoPublicoService.getLicitacionesPorEstado(estado, fecha);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Obtener licitaciones por fecha
-router.get('/fecha/:fecha', async (req, res) => {
-  try {
-    const { fecha } = req.params;
-    const data = await mercadoPublicoService.getLicitacionesPorFecha(fecha);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Enriquecer licitaciones con detalle completo
-router.post('/enriquecer', async (req, res) => {
-  try {
-    const { codigos } = req.body;
-    if (!codigos || !Array.isArray(codigos)) {
-      return res.status(400).json({ error: 'Se requiere un array de códigos' });
-    }
-    const limitedCodigos = codigos.slice(0, 20);
-    const detalles = await mercadoPublicoService.enriquecerLicitaciones(limitedCodigos);
-    res.json({ Cantidad: detalles.length, Listado: detalles });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.json({ total: 0, regiones: 0 });
   }
 });
 
@@ -109,14 +91,12 @@ router.post('/guardar', async (req, res) => {
 router.get('/guardadas/:usuarioId', async (req, res) => {
   try {
     const { usuarioId } = req.params;
-
     const result = await query(
       `SELECT * FROM licitaciones_guardadas
        WHERE usuario_id = $1
        ORDER BY fecha_guardado DESC`,
       [usuarioId]
     );
-
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ error: error.message });

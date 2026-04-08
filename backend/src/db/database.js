@@ -79,6 +79,19 @@ export async function initializeDatabase() {
         estado_licitacion VARCHAR(50),
         creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS cache_licitaciones (
+        codigo_externo VARCHAR(50) PRIMARY KEY,
+        datos JSONB NOT NULL,
+        region VARCHAR(255),
+        nombre_organismo VARCHAR(500),
+        monto_estimado DECIMAL,
+        tipo VARCHAR(10),
+        fecha_cache TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_cache_region ON cache_licitaciones(region);
+      CREATE INDEX IF NOT EXISTS idx_cache_fecha ON cache_licitaciones(fecha_cache);
     `);
     
     client.release();

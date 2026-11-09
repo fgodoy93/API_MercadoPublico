@@ -16,7 +16,6 @@ services:
       - DB_NAME=${DB_NAME:-mercado_publico}
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres_password}
-      - DATABASE_URL=${DATABASE_URL:-}
       - DB_SSL=${DB_SSL:-false}
       - MERCADO_PUBLICO_TICKET=${MERCADO_PUBLICO_TICKET:-53CA2806-ED69-4108-9148-6F7B5C1A217F}
       - MERCADO_PUBLICO_API_URL=${MERCADO_PUBLICO_API_URL:-https://api.mercadopublico.cl/servicios/v1/publico}

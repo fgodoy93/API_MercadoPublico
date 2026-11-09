@@ -3,8 +3,12 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const sequelize = process.env.DATABASE_URL
-  ? new Sequelize(process.env.DATABASE_URL, {
+const hasValidDatabaseUrl = Boolean(
+  process.env.DATABASE_URL && process.env.DATABASE_URL.trim().startsWith('postgres')
+);
+
+const sequelize = hasValidDatabaseUrl
+  ? new Sequelize(process.env.DATABASE_URL.trim(), {
       dialect: 'postgres',
       logging: process.env.NODE_ENV === 'development' ? console.log : false,
       dialectOptions: process.env.DB_SSL === 'false'

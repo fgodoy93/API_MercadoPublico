@@ -894,9 +894,9 @@ export const mercadoPublicoService = {
         const maxBudgetParam = modalidadeMaxCLP(modalidad, precioMax);
         const baseParams = {
           status: 2, // 2 = Publicada
-          order_by: 'recent',
-          region: regionCode
+          order_by: 'recent'
         };
+        if (regionCode && regionCode !== 'all') baseParams.region = regionCode;
         if (precioMin && Number(precioMin) > 0) baseParams.min_budget = Number(precioMin);
         if (maxBudgetParam && Number(maxBudgetParam) > 0 && modalidad === '30utm') {
           baseParams.max_budget = Number(maxBudgetParam);
@@ -909,24 +909,31 @@ export const mercadoPublicoService = {
           const params1 = { ...baseParams, page_number: Number(pagina) || 1 };
           if (etiquetasUnicas[0]) params1.keywords = etiquetasUnicas[0];
 
-          const resp1 = await axios.get(COMPRA_AGIL_CLOUD_URL, {
-            headers: COMPRA_AGIL_HEADERS,
-            params: params1,
-            timeout: 8000
-          });
-          const payload1 = resp1.data?.payload || {};
-          totalCloudCount = Number(payload1.resultCount || 0);
-          const resultados1 = Array.isArray(payload1.resultados) ? payload1.resultados : [];
-          itemsCotCloud = resultados1.map(normalizarItemListadoCompraAgil);
+          const cacheKeyCA = `ca_${JSON.stringify(params1)}`;
+          const cachedCA = getListadoFromCache(cacheKeyCA);
+          if (cachedCA) {
+            totalCloudCount = cachedCA.totalCloudCount;
+            itemsCotCloud = cachedCA.itemsCotCloud;
+          } else {
+            const resp1 = await axios.get(COMPRA_AGIL_CLOUD_URL, {
+              headers: COMPRA_AGIL_HEADERS,
+              params: params1,
+              timeout: 18000
+            });
+            const payload1 = resp1.data?.payload || {};
+            totalCloudCount = Number(payload1.resultCount || 0);
+            const resultados1 = Array.isArray(payload1.resultados) ? payload1.resultados : [];
+            itemsCotCloud = resultados1.map(normalizarItemListadoCompraAgil);
+            setListadoCache(cacheKeyCA, { totalCloudCount, itemsCotCloud });
+          }
         } else {
           // Múltiples palabras clave seleccionadas (ej: usuario marcó varias o "Seleccionar Todas")
-          // Consultamos hasta 8 términos en paralelo en api.buscador.mercadopublico.cl y unificamos resultados
-          const terminosConsulta = etiquetasUnicas.slice(0, 8);
+          const terminosConsulta = etiquetasUnicas.slice(0, 6);
           const promesas = terminosConsulta.map(kw =>
             axios.get(COMPRA_AGIL_CLOUD_URL, {
               headers: COMPRA_AGIL_HEADERS,
               params: { ...baseParams, keywords: kw, page_number: Number(pagina) || 1 },
-              timeout: 7000
+              timeout: 15000
             }).catch(() => null)
           );
           const respuestas = await Promise.all(promesas);

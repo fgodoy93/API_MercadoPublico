@@ -11,9 +11,9 @@ export function setupRoutes(app) {
   app.use('/api/ia', iaRoutes);
   app.use('/api/filtros', filtrosRoutes);
 
-  // 404 handler
-  app.use((req, res) => {
-    res.status(404).json({ error: 'Ruta no encontrada' });
+  // 404 handler exclusivo para rutas /api no existentes (para permitir servir el frontend SPA en '/')
+  app.use('/api', (req, res) => {
+    res.status(404).json({ error: 'Ruta de API no encontrada' });
   });
 
   // Error handler

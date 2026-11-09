@@ -71,28 +71,48 @@
           </button>
         </div>
 
-        <!-- Botón rápido Mi Rubro y Etiquetas 1-Clic -->
-        <div v-if="perfil" class="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="text-[11px] font-extrabold uppercase text-emerald-900">🎯 Tus Servicios (1-Clic)</span>
-            <button
-              @click="filtrarConMiPerfil"
-              class="text-[11px] font-bold text-emerald-700 hover:underline"
-            >
-              Aplicar Perfil
-            </button>
+        <!-- Selector Multi-Palabra Clave de Mi Rubro -->
+        <div v-if="perfil" class="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 space-y-2.5">
+          <div class="flex flex-wrap items-center justify-between gap-1">
+            <div>
+              <span class="text-[11px] font-extrabold uppercase text-emerald-900 block">
+                🎯 {{ perfil.nombreEmpresa }}
+              </span>
+              <span class="text-[10px] font-semibold text-emerald-700">
+                {{ keywordsSeleccionadas.length > 0 ? `${keywordsSeleccionadas.length} de ${keywordsPerfil.length} seleccionadas` : 'Haz clic en 1 o varias etiquetas' }}
+              </span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <button
+                type="button"
+                @click="filtrarConMiPerfil"
+                class="text-[11px] font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg transition shadow-sm"
+              >
+                ✓ Todas ({{ keywordsPerfil.length }})
+              </button>
+              <button
+                v-if="keywordsSeleccionadas.length > 0"
+                type="button"
+                @click="limpiarKeywordsSeleccionadas"
+                class="text-[11px] font-bold bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-emerald-200 px-2 py-1 rounded-lg transition"
+              >
+                ✕
+              </button>
+            </div>
           </div>
-          <div v-if="keywordsPerfil.length > 0" class="flex flex-wrap gap-1">
+          <div v-if="keywordsPerfil.length > 0" class="flex flex-wrap gap-1 max-h-40 overflow-y-auto pr-1">
             <button
               v-for="(kw, i) in keywordsPerfil"
               :key="i"
+              type="button"
               @click="filtrarPorKeywordPerfil(kw)"
-              :class="filtros.palabraClave.toLowerCase() === kw.toLowerCase()
-                ? 'bg-emerald-600 text-white border-emerald-600'
-                : 'bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-100'"
-              class="px-2 py-0.5 rounded-md text-[11px] font-semibold border transition"
+              :class="esKeywordSeleccionada(kw)
+                ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm'
+                : 'bg-white text-emerald-900 border-emerald-200 hover:bg-emerald-100'"
+              class="px-2 py-0.5 rounded-md text-[11px] font-semibold border transition flex items-center gap-1"
             >
-              {{ kw }}
+              <span v-if="esKeywordSeleccionada(kw)" class="text-[10px]">✓</span>
+              <span>{{ kw }}</span>
             </button>
           </div>
         </div>
@@ -431,7 +451,8 @@ const mostrarPanelMatch = reactive({})
 const calculandoMatch = reactive({})
 
 const modalidades = [
-  { id: 'todas', label: '⚡ Todas (< 100 UTM / ~$6,6M)' },
+  { id: 'todas', label: '⚡ Todas (< 100 UTM · COT + L1)' },
+  { id: 'cot', label: '🛒 Solo Compra Ágil (COT en vivo)' },
   { id: '30utm', label: '🟢 Hasta 30 UTM (~$2,0M)' },
   { id: 'l1', label: '📋 Licitación Simplificada L1' }
 ]
@@ -449,15 +470,30 @@ const filtros = ref({
 })
 
 const perfil = computed(() => perfilStore.perfil)
+const keywordsSeleccionadas = ref([])
 
 const keywordsPerfil = computed(() => {
   if (!perfil.value?.servicios) return []
-  return perfil.value.servicios.split(',').map(s => s.trim()).filter(Boolean).slice(0, 10)
+  return perfil.value.servicios.split(/[,;.\n]+/).map(s => s.trim()).filter(Boolean)
 })
 
+const esKeywordSeleccionada = (kw) => {
+  return keywordsSeleccionadas.value.some(k => k.toLowerCase() === kw.toLowerCase())
+}
+
 const filtrarPorKeywordPerfil = async (kw) => {
-  filtros.value.palabraClave = filtros.value.palabraClave === kw ? '' : kw
+  const idx = keywordsSeleccionadas.value.findIndex(k => k.toLowerCase() === kw.toLowerCase())
+  if (idx !== -1) {
+    keywordsSeleccionadas.value.splice(idx, 1)
+  } else {
+    keywordsSeleccionadas.value.push(kw)
+  }
   filtros.value.palabrasExcluidas = perfil.value?.palabrasExcluidas || ''
+  await buscar(1)
+}
+
+const limpiarKeywordsSeleccionadas = async () => {
+  keywordsSeleccionadas.value = []
   await buscar(1)
 }
 
@@ -473,7 +509,10 @@ const cambiarModalidad = (id) => {
 
 const buscar = async (pagina = 1) => {
   filtros.value.pagina = pagina
-  await licitacionesStore.buscarComprasAgiles({ ...filtros.value })
+  await licitacionesStore.buscarComprasAgiles({
+    ...filtros.value,
+    palabrasClave: [...keywordsSeleccionadas.value]
+  })
 }
 
 const cambiarPagina = async (nuevaPagina) => {
@@ -483,8 +522,10 @@ const cambiarPagina = async (nuevaPagina) => {
 }
 
 const limpiar = async () => {
+  keywordsSeleccionadas.value = []
   filtros.value = {
     palabraClave: '',
+    palabrasExcluidas: '',
     region: '',
     modalidad: 'todas',
     precioMax: null,
@@ -498,11 +539,11 @@ const limpiar = async () => {
 
 const filtrarConMiPerfil = async () => {
   if (!perfil.value) return
-  const primeraKw = (perfil.value.servicios || '').split(',')[0]?.trim() || ''
+  keywordsSeleccionadas.value = [...keywordsPerfil.value]
   const primeraReg = (!perfil.value.coberturaNacional && perfil.value.regiones)
     ? (perfil.value.regiones || '').split(',')[0]?.trim() || ''
     : ''
-  filtros.value.palabraClave = primeraKw
+  filtros.value.palabraClave = ''
   filtros.value.palabrasExcluidas = perfil.value.palabrasExcluidas || ''
   filtros.value.region = primeraReg
   await buscar(1)

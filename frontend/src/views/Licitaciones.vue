@@ -87,30 +87,49 @@
           </button>
         </div>
 
-        <!-- Botón rápido Mi Perfil y Etiquetas Clicables -->
-        <div v-if="perfil" class="bg-purple-50/70 border border-purple-200 rounded-xl p-3 space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="text-[11px] font-extrabold uppercase text-purple-900">🎯 {{ perfil.nombreEmpresa }}</span>
-            <button
-              type="button"
-              @click="aplicarFiltrosDeMiPerfil"
-              class="text-[11px] font-bold text-purple-700 hover:underline"
-            >
-              Aplicar Todo
-            </button>
+        <!-- Selector Multi-Palabra Clave de Mi Perfil -->
+        <div v-if="perfil" class="bg-purple-50/70 border border-purple-200 rounded-xl p-3 space-y-2.5">
+          <div class="flex flex-wrap items-center justify-between gap-1">
+            <div>
+              <span class="text-[11px] font-extrabold uppercase text-purple-900 block">
+                🎯 {{ perfil.nombreEmpresa }}
+              </span>
+              <span class="text-[10px] font-semibold text-purple-700">
+                {{ keywordsSeleccionadas.length > 0 ? `${keywordsSeleccionadas.length} de ${keywordsPerfil.length} seleccionadas` : 'Haz clic en 1 o varias etiquetas' }}
+              </span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <button
+                type="button"
+                @click="aplicarFiltrosDeMiPerfil"
+                class="text-[11px] font-extrabold bg-purple-600 hover:bg-purple-700 text-white px-2.5 py-1 rounded-lg transition shadow-sm"
+                title="Selecciona todas las palabras clave, tramos, región y exclusiones de tu empresa"
+              >
+                ✓ Todas ({{ keywordsPerfil.length }})
+              </button>
+              <button
+                v-if="keywordsSeleccionadas.length > 0"
+                type="button"
+                @click="limpiarKeywordsSeleccionadas"
+                class="text-[11px] font-bold bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-purple-200 px-2 py-1 rounded-lg transition"
+              >
+                ✕
+              </button>
+            </div>
           </div>
-          <div v-if="keywordsPerfil.length > 0" class="flex flex-wrap gap-1">
+          <div v-if="keywordsPerfil.length > 0" class="flex flex-wrap gap-1 max-h-40 overflow-y-auto pr-1">
             <button
               v-for="(kw, i) in keywordsPerfil"
               :key="i"
               type="button"
               @click="filtrarPorKeywordPerfil(kw)"
-              :class="filtros.palabraClave.toLowerCase() === kw.toLowerCase()
-                ? 'bg-purple-600 text-white border-purple-600'
-                : 'bg-white text-purple-800 border-purple-200 hover:bg-purple-100'"
-              class="px-2 py-0.5 rounded-md text-[11px] font-semibold border transition"
+              :class="esKeywordSeleccionada(kw)
+                ? 'bg-purple-600 text-white border-purple-700 shadow-sm'
+                : 'bg-white text-purple-900 border-purple-200 hover:bg-purple-100'"
+              class="px-2 py-0.5 rounded-md text-[11px] font-semibold border transition flex items-center gap-1"
             >
-              {{ kw }}
+              <span v-if="esKeywordSeleccionada(kw)" class="text-[10px]">✓</span>
+              <span>{{ kw }}</span>
             </button>
           </div>
         </div>
@@ -700,6 +719,7 @@ const filtros = ref({
 })
 
 const perfil = computed(() => perfilStore.perfil)
+const keywordsSeleccionadas = ref([])
 
 const totalEnriquecidasPagina = computed(() => {
   return licitacionesStore.licitaciones.filter(l => l.DetalleEnriquecido).length
@@ -707,18 +727,34 @@ const totalEnriquecidasPagina = computed(() => {
 
 const keywordsPerfil = computed(() => {
   if (!perfil.value?.servicios) return []
-  return perfil.value.servicios.split(',').map(s => s.trim()).filter(Boolean).slice(0, 10)
+  return perfil.value.servicios.split(/[,;.\n]+/).map(s => s.trim()).filter(Boolean)
 })
 
-// Limpiar matches calculados si cambia la empresa activa en el selector global
+const esKeywordSeleccionada = (kw) => {
+  return keywordsSeleccionadas.value.some(k => k.toLowerCase() === kw.toLowerCase())
+}
+
+// Limpiar matches y etiquetas seleccionadas si cambia la empresa activa en el selector global
 watch(() => perfil.value?.id, () => {
   Object.keys(matchesTarjeta).forEach(k => delete matchesTarjeta[k])
   Object.keys(mostrarPanelMatch).forEach(k => delete mostrarPanelMatch[k])
+  keywordsSeleccionadas.value = []
+  filtros.value.palabrasExcluidas = perfil.value?.palabrasExcluidas || ''
 })
 
 const filtrarPorKeywordPerfil = async (kw) => {
-  filtros.value.palabraClave = filtros.value.palabraClave === kw ? '' : kw
+  const idx = keywordsSeleccionadas.value.findIndex(k => k.toLowerCase() === kw.toLowerCase())
+  if (idx !== -1) {
+    keywordsSeleccionadas.value.splice(idx, 1)
+  } else {
+    keywordsSeleccionadas.value.push(kw)
+  }
   filtros.value.palabrasExcluidas = perfil.value?.palabrasExcluidas || ''
+  await ejecutarBusqueda(1)
+}
+
+const limpiarKeywordsSeleccionadas = async () => {
+  keywordsSeleccionadas.value = []
   await ejecutarBusqueda(1)
 }
 
@@ -730,7 +766,10 @@ const seleccionarTramoRapido = (codigo) => {
 const ejecutarBusqueda = async (pagina = 1) => {
   mensajeEstadoLote.value = ''
   filtros.value.pagina = pagina
-  const payload = { ...filtros.value }
+  const payload = {
+    ...filtros.value,
+    palabrasClave: [...keywordsSeleccionadas.value]
+  }
   if (payload.region) {
     payload.regiones = [payload.region]
   } else {
@@ -746,6 +785,7 @@ const cambiarPagina = async (nuevaPagina) => {
 }
 
 const limpiar = async () => {
+  keywordsSeleccionadas.value = []
   filtros.value = {
     estado: 'activas',
     tipo: '',
@@ -765,11 +805,11 @@ const limpiar = async () => {
 
 const aplicarFiltrosDeMiPerfil = async () => {
   if (!perfil.value) return
-  const primeraKw = (perfil.value.servicios || '').split(',')[0]?.trim() || ''
+  keywordsSeleccionadas.value = [...keywordsPerfil.value]
   const primeraReg = (!perfil.value.coberturaNacional && perfil.value.regiones)
     ? (perfil.value.regiones || '').split(',')[0]?.trim() || ''
     : ''
-  filtros.value.palabraClave = primeraKw
+  filtros.value.palabraClave = ''
   filtros.value.palabrasExcluidas = perfil.value.palabrasExcluidas || ''
   filtros.value.region = primeraReg
   filtros.value.tipo = perfil.value.tiposLicitacion || ''

@@ -8,6 +8,141 @@ dotenv.config();
 const API_URL = process.env.MERCADO_PUBLICO_API_URL || 'https://api.mercadopublico.cl/servicios/v1/publico';
 const TICKET = process.env.MERCADO_PUBLICO_TICKET || process.env.MERCADO_PUBLICO_API_KEY || '53CA2806-ED69-4108-9148-6F7B5C1A217F';
 
+// Endpoint oficial del Buscador de Compra Ágil (COT) de Mercado Público
+const COMPRA_AGIL_CLOUD_URL = 'https://api.buscador.mercadopublico.cl/compra-agil';
+const COMPRA_AGIL_API_KEY = process.env.COMPRA_AGIL_API_KEY || 'e93089e4-437c-4723-b343-4fa20045e3bc';
+const COMPRA_AGIL_HEADERS = {
+  'x-api-key': COMPRA_AGIL_API_KEY,
+  'Origin': 'https://buscador.mercadopublico.cl',
+  'Referer': 'https://buscador.mercadopublico.cl/compra-agil',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Accept': 'application/json'
+};
+
+const MAPA_REGION_COMPRA_AGIL = {
+  'arica': '15',
+  'tarapac': '1',
+  'antofagasta': '2',
+  'atacama': '3',
+  'coquimbo': '4',
+  'valpara': '5',
+  'metropolitana': '13',
+  'higgins': '6',
+  'maule': '7',
+  'uble': '16',
+  'biob': '8',
+  'araucan': '9',
+  'ríos': '14',
+  'rios': '14',
+  'lagos': '10',
+  'ays': '11',
+  'magallanes': '12'
+};
+
+function obtenerCodigoRegionCompraAgil(regionTexto = '') {
+  if (!regionTexto) return 'all';
+  const lower = String(regionTexto).toLowerCase();
+  for (const [clave, id] of Object.entries(MAPA_REGION_COMPRA_AGIL)) {
+    if (lower.includes(clave)) return id;
+  }
+  return 'all';
+}
+
+function normalizarItemListadoCompraAgil(ca) {
+  const monto = Number(ca.monto_disponible_CLP || ca.monto_disponible || ca.presupuesto || 0);
+  return {
+    CodigoExterno: ca.codigo,
+    Nombre: ca.nombre || `Compra Ágil ${ca.codigo}`,
+    CodigoEstado: 5,
+    Estado: ca.estado || 'Publicada',
+    Descripcion: ca.descripcion || `${ca.nombre || ''} — Unidad: ${ca.unidad || ca.organismo || ''}`,
+    FechaCierre: ca.fecha_cierre,
+    DiasRestantes: calcularDiasRestantes(ca.fecha_cierre),
+    Tipo: 'COT',
+    EsCompraAgilCot: true,
+    DescripcionTipo: 'Compra Ágil Oficial (COT ≤ 100 UTM)',
+    Convocatoria: 'Cotización Directa Compra Ágil',
+    Moneda: ca.moneda || 'CLP',
+    MontoEstimado: monto,
+    MontoExactoDisponible: monto > 0,
+    TipoEstimacionTexto: `Presupuesto disponible (${ca.cantidad_proveedores_cotizando ?? 0} cotizaciones recibidas)`,
+    MontoMinimoEstimadoCLP: 0,
+    MontoMaximoEstimadoCLP: monto > 0 ? monto : (100 * 66600),
+    RangoUTM: '0 a 100 UTM (Compra Ágil)',
+    NombreOrganismo: ca.organismo || '',
+    UnidadCompra: ca.unidad || '',
+    RegionUnidad: ca.region || '',
+    ComunaUnidad: ca.comuna || '',
+    CantidadProveedoresCotizando: ca.cantidad_proveedores_cotizando ?? 0,
+    Fechas: {
+      FechaPublicacion: ca.fecha_publicacion || null,
+      FechaCierre: ca.fecha_cierre || null
+    },
+    FechaPublicacion: ca.fecha_publicacion || null,
+    UrlExterna: `https://buscador.mercadopublico.cl/ficha?code=${ca.codigo}`,
+    DetalleEnriquecido: false
+  };
+}
+
+function normalizarDetalleCompraAgil(ficha) {
+  const monto = Number(ficha.presupuesto_estimado || ficha.monto_disponible || 0);
+  const inst = ficha.informacion_institucion || {};
+  const productos = Array.isArray(ficha.productos_solicitados) ? ficha.productos_solicitados : [];
+
+  return {
+    CodigoExterno: ficha.codigo,
+    Nombre: ficha.nombre || `Compra Ágil ${ficha.codigo}`,
+    CodigoEstado: 5,
+    Estado: ficha.estado || 'Publicada',
+    Descripcion: ficha.descripcion || ficha.nombre || '',
+    FechaCierre: ficha.fecha_cierre,
+    DiasRestantes: calcularDiasRestantes(ficha.fecha_cierre),
+    Tipo: 'COT',
+    EsCompraAgilCot: true,
+    DescripcionTipo: 'Compra Ágil Oficial (COT ≤ 100 UTM)',
+    Convocatoria: 'Cotización Directa Compra Ágil',
+    Moneda: ficha.moneda || 'CLP',
+    MontoEstimado: monto,
+    MontoExactoDisponible: monto > 0,
+    TipoEstimacionTexto: `${ficha.tipo_presupuesto || 'Presupuesto Disponible'} (${ficha.total_ofertas_recibidas ?? 0} ofertas recibidas)`,
+    MontoMinimoEstimadoCLP: 0,
+    MontoMaximoEstimadoCLP: monto > 0 ? monto : (100 * 66600),
+    RangoUTM: '0 a 100 UTM (Compra Ágil)',
+    ModalidadPagoTexto: 'Pago a 30 días contra recepción conforme',
+    TiempoDuracionContrato: ficha.plazo_entrega ? `${ficha.plazo_entrega} días de plazo de entrega` : null,
+    DuracionContratoTexto: ficha.plazo_entrega ? `Plazo de entrega: ${ficha.plazo_entrega} días` : 'Entrega inmediata según requerimiento',
+    NombreOrganismo: inst.organismo_comprador || ficha.organismo || '',
+    NombreUnidad: inst.division || ficha.unidad || '',
+    UnidadCompra: inst.division || ficha.unidad || '',
+    RutUnidad: inst.rut_organismo_comprador || '',
+    DireccionUnidad: ficha.direccion_entrega || '',
+    RegionUnidad: ficha.region || '',
+    ComunaUnidad: ficha.direccion_entrega || '',
+    CantidadReclamos: 0,
+    TotalOfertasRecibidas: ficha.total_ofertas_recibidas ?? 0,
+    Fechas: {
+      FechaPublicacion: ficha.fecha_publicacion || null,
+      FechaCierre: ficha.fecha_cierre || null,
+      FechaFinalPreguntas: ficha.fecha_cierre_primer_llamado || null,
+      FechaEstimadaAdjudicacion: ficha.fecha_cierre_segundo_llamado || ficha.fecha_cierre || null
+    },
+    FechaPublicacion: ficha.fecha_publicacion || '',
+    Items: {
+      Cantidad: productos.length,
+      Listado: productos.map((p, idx) => ({
+        Correlativo: idx + 1,
+        CodigoProducto: p.codigo_producto,
+        NombreProducto: p.nombre || 'Ítem Compra Ágil',
+        Descripcion: p.descripcion || p.nombre || '',
+        Cantidad: p.cantidad || 1,
+        UnidadMedida: p.unidad_medida || 'Unid.'
+      }))
+    },
+    UrlExterna: `https://buscador.mercadopublico.cl/ficha?code=${ficha.codigo}`,
+    DetalleEnriquecido: true
+  };
+}
+
 const axiosInstance = axios.create({
   timeout: 90000,
   headers: { 'Accept': 'application/json' }
@@ -337,33 +472,56 @@ async function guardarDetalleEnCache(codigo, detalleNormalizado) {
 }
 
 export const mercadoPublicoService = {
-  // Detalle completo de una licitación (con caché en PostgreSQL y memoria)
+  // Detalle completo de una licitación o Compra Ágil COT (con caché en PostgreSQL y memoria)
   async getLicitacionPorCodigo(codigo) {
-    if (detalleMemoryCache.has(codigo)) {
-      const cached = detalleMemoryCache.get(codigo);
+    const codLimpio = String(codigo || '').trim();
+    if (!codLimpio) return { Cantidad: 0, Listado: [] };
+
+    if (detalleMemoryCache.has(codLimpio)) {
+      const cached = detalleMemoryCache.get(codLimpio);
       cached.DiasRestantes = calcularDiasRestantes(cached.FechaCierre);
       return { Cantidad: 1, Listado: [cached] };
     }
 
     try {
-      const dbRecord = await LicitacionCache.findByPk(codigo);
+      const dbRecord = await LicitacionCache.findByPk(codLimpio);
       if (dbRecord && dbRecord.datos) {
         const norm = dbRecord.datos.DetalleEnriquecido ? dbRecord.datos : normalizarDetalle(dbRecord.datos);
         norm.DiasRestantes = calcularDiasRestantes(norm.FechaCierre);
-        detalleMemoryCache.set(codigo, norm);
+        detalleMemoryCache.set(codLimpio, norm);
         return { Cantidad: 1, Listado: [norm] };
       }
     } catch (e) {
       // Continuar a API
     }
 
+    // Si es una Compra Ágil (ej: 4079-372-COT26), consultar directamente api.buscador.mercadopublico.cl
+    if (/-COT\d+$/i.test(codLimpio)) {
+      try {
+        const respCot = await axios.get(COMPRA_AGIL_CLOUD_URL, {
+          headers: COMPRA_AGIL_HEADERS,
+          params: { action: 'ficha', code: codLimpio },
+          timeout: 10000
+        });
+        const ficha = respCot.data?.payload;
+        if (ficha && ficha.codigo) {
+          const detalleCot = normalizarDetalleCompraAgil(ficha);
+          await guardarDetalleEnCache(codLimpio, detalleCot);
+          return { Cantidad: 1, Listado: [detalleCot] };
+        }
+      } catch (err) {
+        console.error(`Error obteniendo ficha Compra Ágil ${codLimpio}:`, err.message);
+      }
+      return { Cantidad: 0, Listado: [] };
+    }
+
     const data = await enqueueApiCall(() =>
-      fetchWithRetry(`${API_URL}/licitaciones.json`, { codigo, ticket: TICKET })
+      fetchWithRetry(`${API_URL}/licitaciones.json`, { codigo: codLimpio, ticket: TICKET })
     );
     const listado = data?.Listado || [];
     if (listado.length > 0) {
       const detalle = normalizarDetalle(listado[0]);
-      await guardarDetalleEnCache(codigo, detalle);
+      await guardarDetalleEnCache(codLimpio, detalle);
       return { Cantidad: 1, Listado: [detalle] };
     }
     return { Cantidad: 0, Listado: [] };
@@ -487,6 +645,7 @@ export const mercadoPublicoService = {
     precioMin = null,
     precioMax = null,
     palabraClave = '',
+    palabrasClave = [],
     palabrasExcluidas = '',
     soloCierreProximo = false,
     ordenarPor = 'cierre_asc',
@@ -494,6 +653,22 @@ export const mercadoPublicoService = {
     porPagina = 24,
     enriquecerPagina = true
   } = {}) {
+    // Si el usuario buscó un código directo de Compra Ágil (ej: 4079-372-COT26) desde /licitaciones
+    const kwTrim = String(palabraClave || '').trim();
+    if (/-COT\d+$/i.test(kwTrim)) {
+      const cotRes = await this.getLicitacionPorCodigo(kwTrim);
+      const itemsCot = cotRes.Listado || [];
+      return {
+        Cantidad: itemsCot.length,
+        Total: itemsCot.length,
+        Pagina: 1,
+        PorPagina: Number(porPagina),
+        TotalPaginas: 1,
+        Estadisticas: { porTipo: { COT: itemsCot.length }, utmActual: UTM_CLP },
+        Listado: itemsCot
+      };
+    }
+
     let listado = await this.getListado(estado, fecha);
 
     if (listado.length === 0) {
@@ -501,7 +676,6 @@ export const mercadoPublicoService = {
     }
 
     // Precargar detalles cacheados en DB si existen para mejorar filtrado por región/organismo
-    const codigosTotales = listado.map(i => i.CodigoExterno);
     if (detalleMemoryCache.size === 0) {
       try {
         const todosCache = await LicitacionCache.findAll({ limit: 1000 });
@@ -522,9 +696,26 @@ export const mercadoPublicoService = {
       listado = listado.filter(item => tiposArray.includes(item.Tipo));
     }
 
-    // 2. Filtro por Palabra Clave (soporta múltiples términos o búsqueda exacta)
-    if (palabraClave && palabraClave.trim() !== '') {
-      const terminos = palabraClave.toLowerCase().trim().split(/\s+/);
+    // 2. Filtro por Múltiples Palabras Clave seleccionadas (OR entre etiquetas seleccionadas o separadas por coma)
+    const listaEtiquetas = [
+      ...(Array.isArray(palabrasClave) ? palabrasClave : []),
+      ...(kwTrim.includes(',') ? kwTrim.split(',') : [])
+    ].map(s => String(s).trim().toLowerCase()).filter(s => s.length >= 2);
+
+    if (listaEtiquetas.length > 0) {
+      const regexes = listaEtiquetas.map(kw => {
+        const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`(^|[^a-záéíóúñ0-9])${escaped}([^a-záéíóúñ0-9]|$)`, 'i');
+      });
+      listado = listado.filter(item => {
+        const texto = `${item.Nombre || ''} ${item.CodigoExterno || ''} ${item.NombreOrganismo || ''} ${item.Descripcion || ''} ${item.RegionUnidad || ''} ${item.ComunaUnidad || ''}`;
+        return regexes.some(rx => rx.test(texto));
+      });
+    }
+
+    // 2a. Filtro adicional de texto libre (cuando no lleva comas)
+    if (kwTrim !== '' && !kwTrim.includes(',')) {
+      const terminos = kwTrim.toLowerCase().split(/\s+/);
       listado = listado.filter(item => {
         const texto = `${item.Nombre || ''} ${item.CodigoExterno || ''} ${item.NombreOrganismo || ''} ${item.Descripcion || ''} ${item.RegionUnidad || ''} ${item.ComunaUnidad || ''}`.toLowerCase();
         return terminos.every(t => texto.includes(t));
@@ -564,7 +755,6 @@ export const mercadoPublicoService = {
         if (item.MontoExactoDisponible && item.MontoEstimado > 0) {
           return item.MontoEstimado >= minVal;
         }
-        // Si no tiene monto exacto aún, usamos el techo del tramo oficial para ver si califica
         const techoTramo = item.MontoMaximoEstimadoCLP;
         return techoTramo === null || techoTramo >= minVal;
       });
@@ -623,22 +813,18 @@ export const mercadoPublicoService = {
     const inicio = (pagina - 1) * porPagina;
     let paginaItems = listado.slice(inicio, inicio + porPagina);
 
-    // Enriquecer automáticamente los primeros resultados de la página que ya estén en DB o enriquecer los top 5 de forma rápida
     if (enriquecerPagina && paginaItems.length > 0) {
       const codigosPagina = paginaItems.map(i => i.CodigoExterno);
       const cachesDB = await obtenerCachesDesdeDB(codigosPagina);
       paginaItems = paginaItems.map(item => cachesDB[item.CodigoExterno] || item);
 
-      // Disparar enriquecimiento asíncrono no bloqueante de los primeros 6 items sin enriquecer
       const faltantes = paginaItems.filter(i => !i.DetalleEnriquecido).slice(0, 6);
       if (faltantes.length > 0) {
         Promise.resolve().then(async () => {
           for (const f of faltantes) {
             try {
               await this.getLicitacionPorCodigo(f.CodigoExterno);
-            } catch (e) {
-              // Silencioso en background
-            }
+            } catch (e) {}
           }
         });
       }
@@ -658,9 +844,10 @@ export const mercadoPublicoService = {
     };
   },
 
-  // BÚSQUEDA COMPRA ÁGIL Y MENORES A 100 UTM (API v2 + Fallback inteligente a L1/E2 <= 100 UTM)
+  // BÚSQUEDA COMPRA ÁGIL EN VIVO (api.buscador.mercadopublico.cl COT + Licitaciones Simplificadas L1/E2)
   async buscarComprasAgiles({
     palabraClave = '',
+    palabrasClave = [],
     palabrasExcluidas = '',
     region = '',
     precioMin = null,
@@ -671,125 +858,162 @@ export const mercadoPublicoService = {
     pagina = 1,
     porPagina = 20
   } = {}) {
-    let itemsApiV2 = [];
-    let fuenteDatos = 'MercadoPúblico — Compras Ágiles y Contrataciones Simplificadas (< 100 UTM)';
+    const kwTrim = String(palabraClave || '').trim();
 
-    // 1. Intentar consultar API v2 de Compra Ágil con timeout corto (4.5s) por si está operativa
-    if (modalidad === 'todas' || modalidad === 'cot') {
+    // Si busca por un código COT exacto (ej: 4079-372-COT26), devolver su ficha completa al instante
+    if (/-COT\d+$/i.test(kwTrim)) {
+      const resDirecta = await this.getLicitacionPorCodigo(kwTrim);
+      const itemsDirectos = resDirecta.Listado || [];
+      return {
+        Cantidad: itemsDirectos.length,
+        Total: itemsDirectos.length,
+        Pagina: 1,
+        PorPagina: Number(porPagina),
+        TotalPaginas: 1,
+        Fuente: 'Buscador Oficial Compra Ágil (Ficha Directa COT)',
+        Tope30UTM: 30 * UTM_CLP,
+        Tope100UTM: 100 * UTM_CLP,
+        Listado: itemsDirectos
+      };
+    }
+
+    const etiquetasActivas = [
+      ...(Array.isArray(palabrasClave) ? palabrasClave : []),
+      ...(kwTrim.includes(',') ? kwTrim.split(',') : (kwTrim ? [kwTrim] : []))
+    ].map(s => String(s).trim()).filter(s => s.length >= 2);
+    const etiquetasUnicas = [...new Set(etiquetasActivas)];
+
+    let itemsCotCloud = [];
+    let totalCloudCount = 0;
+    let fuenteDatos = 'Buscador Oficial Compra Ágil (COT en vivo) + Licitaciones Simplificadas (< 100 UTM)';
+
+    // 1. Consultar el buscador oficial en la nube (api.buscador.mercadopublico.cl/compra-agil)
+    if (modalidad !== 'l1') {
       try {
-        const hoy = new Date();
-        const ayer = new Date(Date.now() - 48 * 60 * 60 * 1000);
-        const paramsV2 = {
-          estado: 'publicada',
-          publicado_desde: ayer.toISOString(),
-          publicado_hasta: hoy.toISOString(),
-          tamano_pagina: 30,
-          numero_pagina: 1
+        const regionCode = obtenerCodigoRegionCompraAgil(region);
+        const maxBudgetParam = modalidadeMaxCLP(modalidad, precioMax);
+        const baseParams = {
+          status: 2, // 2 = Publicada
+          order_by: 'recent',
+          region: regionCode
         };
-        if (palabraClave) paramsV2.q = palabraClave;
-        const respV2 = await axios.get('https://api2.mercadopublico.cl/v2/compra-agil', {
-          headers: { ticket: TICKET, Accept: 'application/json' },
-          params: paramsV2,
-          timeout: 4500
-        });
-        const rawItems = respV2.data?.payload?.items || [];
-        itemsApiV2 = rawItems.map(ca => ({
-          CodigoExterno: ca.codigo,
-          Nombre: ca.nombre,
-          CodigoEstado: 5,
-          Estado: ca.estado?.glosa || 'Publicada',
-          Descripcion: ca.descripcion || ca.nombre,
-          FechaCierre: ca.fecha_cierre,
-          DiasRestantes: calcularDiasRestantes(ca.fecha_cierre),
-          Tipo: 'COT',
-          EsCompraAgilCot: true,
-          DescripcionTipo: 'Compra Ágil (Hasta 30 / 100 UTM)',
-          Convocatoria: 'Cotización Directa',
-          Moneda: ca.moneda || 'CLP',
-          MontoEstimado: Number(ca.presupuesto || ca.monto_estimado || 0),
-          MontoExactoDisponible: Boolean(ca.presupuesto || ca.monto_estimado),
-          MontoMinimoEstimadoCLP: 0,
-          MontoMaximoEstimadoCLP: Number(ca.presupuesto || ca.monto_estimado || (30 * UTM_CLP)),
-          RangoUTM: '0 a 30 / 100 UTM',
-          NombreOrganismo: ca.institucion?.nombre || ca.organismo || '',
-          RegionUnidad: ca.region?.nombre || ca.region || '',
-          ComunaUnidad: ca.comuna || '',
-          Fechas: {
-            FechaPublicacion: ca.fecha_publicacion || null,
-            FechaCierre: ca.fecha_cierre || null
-          },
-          UrlExterna: `https://buscador.mercadopublico.cl/ficha?code=${ca.codigo}`,
-          DetalleEnriquecido: true
-        }));
-        if (itemsApiV2.length > 0) {
-          fuenteDatos = 'API v2 Compra Ágil (COT) + Licitaciones Simplificadas (< 100 UTM)';
+        if (precioMin && Number(precioMin) > 0) baseParams.min_budget = Number(precioMin);
+        if (maxBudgetParam && Number(maxBudgetParam) > 0 && modalidad === '30utm') {
+          baseParams.max_budget = Number(maxBudgetParam);
+        } else if (precioMax && Number(precioMax) > 0) {
+          baseParams.max_budget = Number(precioMax);
         }
-      } catch (e) {
-        // La pasarela api2.mercadopublico.cl dio timeout 504 o 429: continuamos sin interrumpir con el pool activo < 100 UTM
+
+        if (etiquetasUnicas.length <= 1) {
+          // Búsqueda general o con 1 palabra clave: paginación directa contra las ~8.900+ Compras Ágiles
+          const params1 = { ...baseParams, page_number: Number(pagina) || 1 };
+          if (etiquetasUnicas[0]) params1.keywords = etiquetasUnicas[0];
+
+          const resp1 = await axios.get(COMPRA_AGIL_CLOUD_URL, {
+            headers: COMPRA_AGIL_HEADERS,
+            params: params1,
+            timeout: 8000
+          });
+          const payload1 = resp1.data?.payload || {};
+          totalCloudCount = Number(payload1.resultCount || 0);
+          const resultados1 = Array.isArray(payload1.resultados) ? payload1.resultados : [];
+          itemsCotCloud = resultados1.map(normalizarItemListadoCompraAgil);
+        } else {
+          // Múltiples palabras clave seleccionadas (ej: usuario marcó varias o "Seleccionar Todas")
+          // Consultamos hasta 8 términos en paralelo en api.buscador.mercadopublico.cl y unificamos resultados
+          const terminosConsulta = etiquetasUnicas.slice(0, 8);
+          const promesas = terminosConsulta.map(kw =>
+            axios.get(COMPRA_AGIL_CLOUD_URL, {
+              headers: COMPRA_AGIL_HEADERS,
+              params: { ...baseParams, keywords: kw, page_number: Number(pagina) || 1 },
+              timeout: 7000
+            }).catch(() => null)
+          );
+          const respuestas = await Promise.all(promesas);
+          const vistos = new Set();
+          for (const r of respuestas) {
+            const p = r?.data?.payload;
+            if (!p) continue;
+            totalCloudCount += Number(p.resultCount || 0);
+            for (const item of (p.resultados || [])) {
+              if (!vistos.has(item.codigo)) {
+                vistos.add(item.codigo);
+                itemsCotCloud.push(normalizarItemListadoCompraAgil(item));
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Aviso consultando api.buscador.mercadopublico.cl/compra-agil:', err.message);
       }
     }
 
-    // 2. Obtener todas las contrataciones rápidas (< 100 UTM: L1 y E2) activas en Chile
-    const resRapidas = await this.buscar({
-      estado: 'activas',
-      tipo: ['L1', 'E2'],
-      palabraClave,
-      palabrasExcluidas,
-      regiones: region ? [region] : [],
-      precioMin,
-      precioMax: modalidadeMaxCLP(modalidad, precioMax),
-      soloCierreProximo,
-      ordenarPor,
-      pagina: 1,
-      porPagina: 500,
-      enriquecerPagina: false
-    });
-
-    const listaL1 = (resRapidas.Listado || []).map(item => ({
-      ...item,
-      EsCompraAgilCot: false,
-      DescripcionTipo: item.MontoExactoDisponible && item.MontoEstimado <= 30 * UTM_CLP
-        ? 'Compra Rápida ≤ 30 UTM'
-        : 'Compra Menor / Ágil (< 100 UTM)',
-      UrlExterna: `https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?idlicitacion=${item.CodigoExterno}`
-    }));
-
-    let combinadas = [...itemsApiV2, ...listaL1];
-
-    if (modalidad === '30utm') {
-      combinadas = combinadas.filter(i => {
-        if (i.EsCompraAgilCot) return true;
-        if (i.MontoExactoDisponible && i.MontoEstimado > 0) return i.MontoEstimado <= 30 * UTM_CLP;
-        return true;
-      });
-    } else if (modalidad === 'cot' && itemsApiV2.length > 0) {
-      combinadas = itemsApiV2;
+    // Filtrar palabras excluidas sobre los resultados COT
+    if (palabrasExcluidas && String(palabrasExcluidas).trim() !== '' && itemsCotCloud.length > 0) {
+      const negArray = (Array.isArray(palabrasExcluidas)
+        ? palabrasExcluidas
+        : String(palabrasExcluidas).split(/[,;.\n]+/)
+      ).map(s => s.trim().toLowerCase()).filter(s => s.length >= 2);
+      if (negArray.length > 0) {
+        itemsCotCloud = itemsCotCloud.filter(item => {
+          const texto = `${item.Nombre || ''} ${item.Descripcion || ''} ${item.NombreOrganismo || ''}`.toLowerCase();
+          return !negArray.some(neg => texto.includes(neg));
+        });
+      }
     }
 
-    const total = combinadas.length;
-    const totalPaginas = Math.ceil(total / porPagina) || 1;
-    const inicio = (pagina - 1) * porPagina;
-    let paginaItems = combinadas.slice(inicio, inicio + porPagina);
+    // 2. Obtener contrataciones simplificadas L1 y E2 (< 100 UTM) si modalidad lo incluye
+    let listaL1 = [];
+    if (modalidad === 'todas' || modalidad === 'l1' || modalidad === '30utm') {
+      const resRapidas = await this.buscar({
+        estado: 'activas',
+        tipo: ['L1', 'E2'],
+        palabraClave: etiquetasUnicas.length === 1 ? etiquetasUnicas[0] : '',
+        palabrasClave: etiquetasUnicas.length > 1 ? etiquetasUnicas : [],
+        palabrasExcluidas,
+        regiones: region ? [region] : [],
+        precioMin,
+        precioMax: modalidadeMaxCLP(modalidad, precioMax),
+        soloCierreProximo,
+        ordenarPor,
+        pagina: Number(pagina) || 1,
+        porPagina: modalidad === 'l1' ? porPagina : 8,
+        enriquecerPagina: false
+      });
 
-    // Enriquecer con cache de DB y disparar enriquecimiento de los primeros 6 items
-    const codigosPagina = paginaItems.filter(i => !i.EsCompraAgilCot).map(i => i.CodigoExterno);
+      listaL1 = (resRapidas.Listado || []).map(item => ({
+        ...item,
+        EsCompraAgilCot: false,
+        DescripcionTipo: item.MontoExactoDisponible && item.MontoEstimado <= 30 * UTM_CLP
+          ? 'Compra Rápida ≤ 30 UTM'
+          : 'Licitación Simplificada L1 (< 100 UTM)',
+        UrlExterna: `https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?idlicitacion=${item.CodigoExterno}`
+      }));
+    }
+
+    let paginaItems = modalidad === 'l1'
+      ? listaL1
+      : modalidad === 'cot'
+        ? itemsCotCloud
+        : [...itemsCotCloud, ...listaL1];
+
+    if (soloCierreProximo) {
+      paginaItems = paginaItems.filter(item => item.DiasRestantes !== null && item.DiasRestantes >= 0 && item.DiasRestantes <= 7);
+    }
+
+    // Fusionar con cualquier detalle ya enriquecido en DB
+    const codigosPagina = paginaItems.map(i => i.CodigoExterno);
     const cachesDB = await obtenerCachesDesdeDB(codigosPagina);
     paginaItems = paginaItems.map(item => cachesDB[item.CodigoExterno] ? { ...item, ...cachesDB[item.CodigoExterno] } : item);
 
-    const faltantes = paginaItems.filter(i => !i.DetalleEnriquecido && !i.EsCompraAgilCot).slice(0, 6);
-    if (faltantes.length > 0) {
-      Promise.resolve().then(async () => {
-        for (const f of faltantes) {
-          try {
-            await this.getLicitacionPorCodigo(f.CodigoExterno);
-          } catch (e) {}
-        }
-      });
-    }
+    const totalGlobal = modalidad === 'l1'
+      ? listaL1.length
+      : Math.max(paginaItems.length, totalCloudCount + listaL1.length);
+    const totalPaginas = Math.max(1, Math.ceil(totalGlobal / 15));
 
     return {
       Cantidad: paginaItems.length,
-      Total: total,
+      Total: totalGlobal,
       Pagina: Number(pagina),
       PorPagina: Number(porPagina),
       TotalPaginas: totalPaginas,

@@ -6,7 +6,7 @@ import { LicitacionCache } from '../db/sequelize.js';
 dotenv.config();
 
 const API_URL = process.env.MERCADO_PUBLICO_API_URL || 'https://api.mercadopublico.cl/servicios/v1/publico';
-const TICKET = process.env.MERCADO_PUBLICO_TICKET;
+const TICKET = process.env.MERCADO_PUBLICO_TICKET || process.env.MERCADO_PUBLICO_API_KEY || '53CA2806-ED69-4108-9148-6F7B5C1A217F';
 
 const axiosInstance = axios.create({
   timeout: 90000,

@@ -18,7 +18,8 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:-postgres_password}
       - DATABASE_URL=${DATABASE_URL:-}
       - DB_SSL=${DB_SSL:-false}
-      - MERCADO_PUBLICO_API_KEY=${MERCADO_PUBLICO_API_KEY:-8492A92C-99C9-411F-9530-45B0A3A9C724}
+      - MERCADO_PUBLICO_TICKET=${MERCADO_PUBLICO_TICKET:-53CA2806-ED69-4108-9148-6F7B5C1A217F}
+      - MERCADO_PUBLICO_API_URL=${MERCADO_PUBLICO_API_URL:-https://api.mercadopublico.cl/servicios/v1/publico}
       - JWT_SECRET=${JWT_SECRET:-mercadopublico_enterprise_secret_2026}
     depends_on:
       postgres:

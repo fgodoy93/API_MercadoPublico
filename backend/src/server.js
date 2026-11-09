@@ -51,45 +51,45 @@ async function seedInitialWorkspace() {
       });
     }
 
-    const totalPerfiles = await PerfilEmpresa.count();
-    if (totalPerfiles === 0) {
-      console.log('Inicializando perfiles corporativos base (InnerData y LR INVERSIONES SPA)...');
-      await PerfilEmpresa.bulkCreate([
-        {
-          usuarioId: usuario.id,
-          nombreEmpresa: 'InnerData',
-          rutEmpresa: '76.123.456-7',
-          descripcion: 'InnerData es una firma de ingeniería y consultoría especializada en Analítica Avanzada, Ciencia de Datos, Optimización de Procesos y Desarrollo de Sistemas Digitales a medida.\n\nCapacidades Técnicas Principales:\n• Analítica Avanzada, Ciencia de Datos e IA\n• Business Intelligence (BI) y Visualización Ejecutiva (Power BI, Tableau, Looker)\n• Sistemas Digitales, Desarrollo Web y Automatización (RPA)\n• Control de Gestión y Reingeniería de Procesos\n• Simulación y Optimización Operacional',
-          servicios: 'software, datos, desarrollo, sistema, licencias, soporte informático, nube, servidores, consultoría, asesoría, capacitación, estudio, auditoría, diseño, diagnóstico, ciencia de datos, analítica, power bi, dashboard, business intelligence, desarrollo web, software a medida, automatización, rpa, integración de sistemas, levantamiento de procesos, control de gestión, optimización, modelamiento, base de datos, inteligencia artificial, digitalización',
-          experienciaAnos: 1,
-          regiones: 'Metropolitana, Biobío, Maule, Ñuble',
-          tiposLicitacion: 'L1, LE, LP',
-          presupuestoMinimo: 1000000,
-          presupuestoMaximo: 50000000,
-          rubrosPrincipales: 'ti, consultoria',
-          palabrasExcluidas: 'impresoras, tóner, mobiliario, aseo, construcción, obras civiles, pavimentación, medicamentos, insumos médicos, vehículos, alimentación, catering',
-          coberturaNacional: true,
-          habilitadoChileProveedores: 'si',
-          interesCompraAgil: true,
-          esActivo: true
-        },
-        {
-          usuarioId: usuario.id,
-          nombreEmpresa: 'LR INVERSIONES SPA',
-          rutEmpresa: '77.261.369-5',
-          descripcion: 'LR INVERSIONES SPA es una empresa dedicada a actividades de servicios administrativos y de apoyo con presencia en Providencia, Santiago, Región Metropolitana. Enfocada en prestar servicios ligados al aseo en instalaciones industriales y oficinas.',
-          servicios: 'servicio de aseo, limpieza, áreas verdes, higienización, control de plagas, insumos de aseo, aseo industrial, aseo oficinas',
-          experienciaAnos: 10,
-          regiones: 'Metropolitana, Biobío',
-          tiposLicitacion: 'L1, LE, LP',
-          rubrosPrincipales: 'aseo',
-          coberturaNacional: true,
-          habilitadoChileProveedores: 'si',
-          interesCompraAgil: true,
-          esActivo: false
-        }
-      ]);
-      console.log('✓ Perfiles corporativos inicializados');
+    const existeInnerData = await PerfilEmpresa.findOne({ where: { nombreEmpresa: 'InnerData' } });
+    if (!existeInnerData) {
+      await PerfilEmpresa.create({
+        usuarioId: usuario.id,
+        nombreEmpresa: 'InnerData',
+        rutEmpresa: '76.123.456-7',
+        descripcion: 'InnerData es una firma de ingeniería y consultoría especializada en Analítica Avanzada, Ciencia de Datos, Optimización de Procesos y Desarrollo de Sistemas Digitales a medida.\n\nCapacidades Técnicas Principales:\n• Analítica Avanzada, Ciencia de Datos e IA\n• Business Intelligence (BI) y Visualización Ejecutiva (Power BI, Tableau, Looker)\n• Sistemas Digitales, Desarrollo Web y Automatización (RPA)\n• Control de Gestión y Reingeniería de Procesos\n• Simulación y Optimización Operacional',
+        servicios: 'software, datos, desarrollo, sistema, licencias, soporte informático, nube, servidores, consultoría, asesoría, capacitación, estudio, auditoría, diseño, diagnóstico, ciencia de datos, analítica, power bi, dashboard, business intelligence, desarrollo web, software a medida, automatización, rpa, integración de sistemas, levantamiento de procesos, control de gestión, optimización, modelamiento, base de datos, inteligencia artificial, digitalización',
+        experienciaAnos: 1,
+        regiones: 'Metropolitana, Biobío, Maule, Ñuble',
+        tiposLicitacion: 'L1, LE, LP',
+        presupuestoMinimo: 1000000,
+        presupuestoMaximo: 50000000,
+        rubrosPrincipales: 'ti, consultoria',
+        palabrasExcluidas: 'impresoras, tóner, mobiliario, aseo, construcción, obras civiles, pavimentación, medicamentos, insumos médicos, vehículos, alimentación, catering',
+        coberturaNacional: true,
+        habilitadoChileProveedores: 'si',
+        interesCompraAgil: true,
+        esActivo: true
+      });
+    }
+
+    const existeLR = await PerfilEmpresa.findOne({ where: { nombreEmpresa: 'LR INVERSIONES SPA' } });
+    if (!existeLR) {
+      await PerfilEmpresa.create({
+        usuarioId: usuario.id,
+        nombreEmpresa: 'LR INVERSIONES SPA',
+        rutEmpresa: '77.261.369-5',
+        descripcion: 'LR INVERSIONES SPA es una empresa dedicada a actividades de servicios administrativos y de apoyo con presencia en Providencia, Santiago, Región Metropolitana. Enfocada en prestar servicios ligados al aseo en instalaciones industriales y oficinas.',
+        servicios: 'servicio de aseo, limpieza, áreas verdes, higienización, control de plagas, insumos de aseo, aseo industrial, aseo oficinas',
+        experienciaAnos: 10,
+        regiones: 'Metropolitana, Biobío',
+        tiposLicitacion: 'L1, LE, LP',
+        rubrosPrincipales: 'aseo',
+        coberturaNacional: true,
+        habilitadoChileProveedores: 'si',
+        interesCompraAgil: true,
+        esActivo: false
+      });
     }
   } catch (err) {
     console.error('Aviso en seedInitialWorkspace:', err.message);

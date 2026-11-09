@@ -22,6 +22,9 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 ENV NODE_ENV=production
 ENV PORT=3001
+ENV MERCADO_PUBLICO_TICKET=53CA2806-ED69-4108-9148-6F7B5C1A217F
+ENV MERCADO_PUBLICO_API_URL=https://api.mercadopublico.cl/servicios/v1/publico
+ENV JWT_SECRET=mercadopublico_enterprise_secret_2026
 
 EXPOSE 3001
 

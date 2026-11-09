@@ -2,7 +2,8 @@
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm install
+# Forzar instalación de devDependencies (vite, @vitejs/plugin-vue, etc.) aunque Coolify inyecte NODE_ENV=production en build-time
+RUN npm install --include=dev
 COPY frontend/ ./
 RUN npm run build
 

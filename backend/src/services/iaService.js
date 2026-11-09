@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const aiProvider = process.env.AI_PROVIDER || 'both';
+const aiProvider = process.env.AI_PROVIDER || 'fast';
 
 let claudeClient = null;
 let ollamaClient = null;
@@ -16,74 +16,80 @@ if ((aiProvider === 'claude' || aiProvider === 'both') && process.env.CLAUDE_API
   });
 }
 
-if (aiProvider === 'ollama' || aiProvider === 'both') {
+if (aiProvider === 'ollama') {
   ollamaClient = new Ollama({
     host: process.env.OLLAMA_API_URL || 'http://localhost:11434'
   });
 }
 
-// Motor experto determinístico y heurístico para análisis instantáneo o fallback sin latencia
+// Motor experto determinístico y heurístico para análisis instantáneo (< 1ms)
 function generarAnalisisExperto(perfilEmpresa, licitacion) {
   const servicios = (perfilEmpresa?.servicios || '')
     .split(/[,;.\n]+/)
     .map(s => s.trim().toLowerCase())
-    .filter(s => s.length >= 3);
+    .filter(s => s.length >= 2);
 
   const palabrasDesc = (perfilEmpresa?.descripcion || '')
     .toLowerCase()
     .split(/\s+/)
-    .filter(w => w.length >= 4);
+    .filter(w => w.length >= 5);
 
   const textoLicitacion = `${licitacion?.Nombre || ''} ${licitacion?.Descripcion || ''} ${(licitacion?.Items?.Listado || []).map(i => `${i.NombreProducto} ${i.Descripcion} ${i.Categoria}`).join(' ')}`.toLowerCase();
 
-  let score = 45;
+  let score = 48;
   const puntosFuertes = [];
   const puntosDebiles = [];
   const recomendaciones = [];
 
-  // Evaluar coincidencias de rubro/servicios
-  const coincidenciasServicio = servicios.filter(s => textoLicitacion.includes(s));
+  // Evaluar coincidencias de rubro/servicios con límite de palabra
+  const coincidenciasServicio = servicios.filter(kw => {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(^|[^a-záéíóúñ0-9])${escaped}([^a-záéíóúñ0-9]|$)`, 'i');
+    return regex.test(textoLicitacion);
+  });
   const coincidenciasDesc = [...new Set(palabrasDesc.filter(w => textoLicitacion.includes(w)))];
 
   if (coincidenciasServicio.length > 0) {
-    score += Math.min(30, coincidenciasServicio.length * 15);
-    puntosFuertes.push(`Alta coincidencia técnica con tus servicios declarados (${coincidenciasServicio.slice(0, 3).join(', ')}).`);
+    score += Math.min(34, coincidenciasServicio.length * 16);
+    puntosFuertes.push(`Alta coincidencia técnica con tus servicios declarados (${coincidenciasServicio.slice(0, 4).join(', ')}).`);
   } else if (coincidenciasDesc.length > 0) {
-    score += Math.min(20, coincidenciasDesc.length * 7);
-    puntosFuertes.push(`Coincidencia parcial con términos clave de tu perfil empresarial (${coincidenciasDesc.slice(0, 3).join(', ')}).`);
+    score += Math.min(18, coincidenciasDesc.length * 6);
+    puntosFuertes.push(`Coincidencia parcial con términos de tu perfil (${coincidenciasDesc.slice(0, 3).join(', ')}).`);
   } else {
-    score -= 10;
-    puntosDebiles.push('El objeto de la licitación no menciona explícitamente los servicios principales declarados en tu perfil.');
+    score -= 12;
+    puntosDebiles.push('El título/resumen de la licitación no menciona explícitamente las palabras clave principales de tu empresa.');
   }
 
   // Evaluar Presupuesto / Tramo
-  const montoLic = licitacion?.MontoEstimado || licitacion?.MontoMaximoEstimadoCLP || 0;
+  const montoLic = Number(licitacion?.MontoEstimado) || Number(licitacion?.MontoMaximoEstimadoCLP) || 0;
   const minEmp = Number(perfilEmpresa?.presupuestoMinimo || 0);
   const maxEmp = Number(perfilEmpresa?.presupuestoMaximo || 0);
 
   if (montoLic > 0 && maxEmp > 0) {
     if (montoLic >= minEmp && montoLic <= maxEmp) {
-      score += 15;
-      puntosFuertes.push(`El monto/tramo de la licitación ($${montoLic.toLocaleString('es-CL')} CLP) está dentro de tu capacidad financiera objetivo.`);
+      score += 14;
+      puntosFuertes.push(`El monto/tope de referencia ($${montoLic.toLocaleString('es-CL')} CLP) calza con tu capacidad financiera.`);
     } else if (montoLic > maxEmp) {
-      score -= 12;
-      puntosDebiles.push(`El techo estimado de la licitación ($${montoLic.toLocaleString('es-CL')} CLP) supera el presupuesto máximo configurado en tu perfil.`);
-      recomendaciones.push('Evalúa postular en Unión Temporal de Proveedores (UTP) o verificar garantías de seriedad de la oferta y fiel cumplimiento.');
+      score -= 10;
+      puntosDebiles.push(`El techo del tramo ($${montoLic.toLocaleString('es-CL')} CLP) supera el presupuesto máximo configurado en tu perfil.`);
+      recomendaciones.push('Evalúa postular en Unión Temporal de Proveedores (UTP) o verificar si el presupuesto real es menor al tope del tramo.');
     }
   } else {
-    puntosFuertes.push(`Licitación tipo ${licitacion?.Tipo || 'Pública'} (${licitacion?.RangoUTM || 'Tramo estándar ChileCompra'}).`);
+    puntosFuertes.push(`Licitación tramo ${licitacion?.Tipo || 'Pública'} (${licitacion?.RangoUTM || 'Tramo estándar ChileCompra'}).`);
   }
 
   // Evaluar Región
+  const coberturaNacional = perfilEmpresa?.coberturaNacional !== undefined ? Boolean(perfilEmpresa.coberturaNacional) : true;
   const regionesEmp = (perfilEmpresa?.regiones || '').split(/[,;]+/).map(r => r.trim().toLowerCase()).filter(Boolean);
   const regionLic = (licitacion?.RegionUnidad || '').toLowerCase();
   if (regionesEmp.length > 0 && regionLic) {
     if (regionesEmp.some(r => regionLic.includes(r))) {
       score += 10;
-      puntosFuertes.push(`Ubicación geográfica favorable: ${licitacion.RegionUnidad} coincide con tus zonas de operación.`);
-    } else {
-      puntosDebiles.push(`La unidad de compra está en ${licitacion.RegionUnidad || 'otra región'}, fuera de tus regiones habituales.`);
-      recomendaciones.push('Considera costos logísticos, traslado o flete hacia la dirección de entrega indicada en las bases.');
+      puntosFuertes.push(`Ubicación favorable: ${licitacion.RegionUnidad} coincide con tus regiones operativas.`);
+    } else if (!coberturaNacional) {
+      score -= 12;
+      puntosDebiles.push(`La unidad de compra está en ${licitacion.RegionUnidad || 'otra región'}, fuera de tus zonas preferidas.`);
+      recomendaciones.push('Considera costos logísticos, traslado o flete hacia la comuna de entrega.');
     }
   }
 
@@ -91,14 +97,15 @@ function generarAnalisisExperto(perfilEmpresa, licitacion) {
   const dias = licitacion?.DiasRestantes;
   if (dias !== null && dias !== undefined) {
     if (dias >= 5) {
+      score += 4;
       puntosFuertes.push(`Holgura de tiempo adecuada (${dias} días restantes hasta el cierre de ofertas).`);
     } else if (dias >= 0) {
-      puntosDebiles.push(`Plazo de cierre muy ajustado (${dias} días restantes).`);
-      recomendaciones.push('Prioriza inmediatamente la descarga de bases administrativas y subida de anexos técnicos.');
+      puntosDebiles.push(`Plazo de cierre muy próximo (${dias} días restantes).`);
+      recomendaciones.push('Prioriza hoy la descarga de bases administrativas y preparación de anexos.');
     }
   }
 
-  // Evaluar ChileProveedores, Garantías y Palabras Excluidas
+  // Evaluar Palabras Excluidas
   const excluidas = (perfilEmpresa?.palabrasExcluidas || '')
     .split(/[,;.\n]+/)
     .map(s => s.trim().toLowerCase())
@@ -106,39 +113,43 @@ function generarAnalisisExperto(perfilEmpresa, licitacion) {
   const encontradasExcluidas = excluidas.filter(ex => textoLicitacion.includes(ex));
   if (encontradasExcluidas.length > 0) {
     score -= 35;
-    puntosDebiles.push(`⚠️ Alerta de Exclusión: La licitación menciona términos descartados en tu perfil (${encontradasExcluidas.join(', ')}).`);
+    puntosDebiles.push(`⚠️ Alerta de Exclusión: Menciona términos descartados en tu perfil (${encontradasExcluidas.join(', ')}).`);
   }
 
   if (perfilEmpresa?.habilitadoChileProveedores === 'si') {
-    score += 5;
-    puntosFuertes.push('Empresa habilitada en ChileProveedores, lista para contratar con el Estado sin bloqueo formal.');
-  } else if (perfilEmpresa?.habilitadoChileProveedores === 'no') {
-    score -= 10;
-    puntosDebiles.push('No estás inscrito/habilitado en ChileProveedores (obligatorio para suscribir contrato u OC en la mayoría de bases).');
+    score += 4;
+    puntosFuertes.push('Empresa habilitada en ChileProveedores para contratar sin bloqueo formal.');
   }
 
   const capGarantia = Number(perfilEmpresa?.capacidadGarantia || 0);
   if (capGarantia > 0 && montoLic > 0) {
-    // Típicamente la garantía de fiel cumplimiento es 5% del contrato
     const garantiaEstimada5Pct = Math.round(montoLic * 0.05);
     if (capGarantia >= garantiaEstimada5Pct) {
-      puntosFuertes.push(`Capacidad de garantía suficiente ($${capGarantia.toLocaleString('es-CL')}) frente a una garantía estimada del 5% (~$${garantiaEstimada5Pct.toLocaleString('es-CL')}).`);
+      puntosFuertes.push(`Capacidad de garantía suficiente frente al 5% estimado (~$${garantiaEstimada5Pct.toLocaleString('es-CL')}).`);
     } else {
-      score -= 8;
-      puntosDebiles.push(`La garantía de fiel cumplimiento estimada (5% ≈ $${garantiaEstimada5Pct.toLocaleString('es-CL')}) podría superar tu tope de garantía declarado.`);
+      score -= 6;
+      puntosDebiles.push(`La garantía de fiel cumplimiento (5% ≈ $${garantiaEstimada5Pct.toLocaleString('es-CL')}) podría superar tu tope declarado.`);
     }
   }
 
-  recomendaciones.push(
-    `Verifica las fechas del foro de preguntas (${licitacion?.Fechas?.FechaFinalPreguntas ? 'cierra el ' + new Date(licitacion.Fechas.FechaFinalPreguntas).toLocaleDateString('es-CL') : 'según cronograma'}) para aclarar especificaciones técnicas.`,
-    `Revisa la modalidad de pago (${licitacion?.ModalidadPagoTexto || '30 días contra recepción conforme'}) y requisitos de subcontratación.`
-  );
+  if (recomendaciones.length === 0) {
+    recomendaciones.push(
+      `Simula tu oferta al 82.5% (Óptima) o 70% (Competitiva) en la ficha antes de presentar propuesta económica.`,
+      `Revisa la modalidad de pago (${licitacion?.ModalidadPagoTexto || '30 días contra recepción conforme'}) y cronograma de preguntas.`
+    );
+  }
+
+  const debilidadesFinales = puntosDebiles.length > 0
+    ? puntosDebiles
+    : ['Sin alertas críticas detectadas para el perfil actual.'];
 
   return {
     nivelMatch: Math.max(15, Math.min(98, score)),
     puntosBlind: {
       puntosFuertes,
-      puntosDebiles: puntosDebiles.length > 0 ? puntosDebiles : ['Sin alertas críticas detectadas para el perfil actual.'],
+      fortalezas: puntosFuertes,
+      puntosDebiles: debilidadesFinales,
+      debilidades: debilidadesFinales,
       recomendaciones
     }
   };
@@ -263,63 +274,47 @@ function generarPreguntasForoExpertas(perfilEmpresa, licitacion) {
 }
 
 export const iaService = {
-  async analizarMatch(perfilEmpresa, licitacion, provider = 'best') {
-    const prompt = `
-Analiza el nivel de match entre el perfil de una empresa y una licitación de Mercado Público Chile.
-PERFIL: ${JSON.stringify(perfilEmpresa)}
-LICITACIÓN: ${JSON.stringify(licitacion)}
-Responde estrictamente en JSON con la estructura:
-{
-  "nivelMatch": 85,
-  "puntosBlind": {
-    "puntosFuertes": ["..."],
-    "puntosDebiles": ["..."],
-    "recomendaciones": ["..."]
-  }
-}`;
-    try {
-      const res = await this.generateResponse(prompt, provider);
-      if (res && typeof res.nivelMatch === 'number') return res;
-      return generarAnalisisExperto(perfilEmpresa, licitacion);
-    } catch {
-      return generarAnalisisExperto(perfilEmpresa, licitacion);
+  async analizarMatch(perfilEmpresa, licitacion, provider = 'fast') {
+    if (provider === 'claude' && claudeClient) {
+      try {
+        const prompt = `Analiza match JSON entre ${JSON.stringify(perfilEmpresa)} y ${JSON.stringify(licitacion)}`;
+        const res = await this.generateWithClaude(prompt);
+        if (res && typeof res.nivelMatch === 'number') return res;
+      } catch {
+        // Fallback instantáneo
+      }
     }
+    return generarAnalisisExperto(perfilEmpresa, licitacion);
   },
 
-  async generarResumenLicitacion(licitacion, provider = 'best') {
-    try {
-      const prompt = `Genera un resumen ejecutivo en JSON de esta licitación: ${JSON.stringify(licitacion)}`;
-      const res = await this.generateResponse(prompt, provider);
-      if (res && !res.texto) return res;
-      return generarResumenExperto(licitacion);
-    } catch {
-      return generarResumenExperto(licitacion);
+  async generarResumenLicitacion(licitacion, provider = 'fast') {
+    if (provider === 'claude' && claudeClient) {
+      try {
+        const prompt = `Genera resumen ejecutivo JSON de: ${JSON.stringify(licitacion)}`;
+        const res = await this.generateWithClaude(prompt);
+        if (res && !res.texto) return res;
+      } catch {
+        // Fallback instantáneo
+      }
     }
+    return generarResumenExperto(licitacion);
   },
 
-  async generarDocumentacionPostulacion(perfilEmpresa, licitacion, provider = 'best') {
-    try {
-      const prompt = `Genera checklist y documentación para postular en JSON: Perfil=${JSON.stringify(perfilEmpresa)}, Licitacion=${JSON.stringify(licitacion)}`;
-      const res = await this.generateResponse(prompt, provider);
-      if (res && !res.texto && res.borradorPropuestaTecnica) return res;
-      return generarDocumentacionExperta(perfilEmpresa, licitacion);
-    } catch {
-      return generarDocumentacionExperta(perfilEmpresa, licitacion);
+  async generarDocumentacionPostulacion(perfilEmpresa, licitacion, provider = 'fast') {
+    if (provider === 'claude' && claudeClient) {
+      try {
+        const prompt = `Genera checklist JSON: Perfil=${JSON.stringify(perfilEmpresa)}, Licitacion=${JSON.stringify(licitacion)}`;
+        const res = await this.generateWithClaude(prompt);
+        if (res && !res.texto && res.borradorPropuestaTecnica) return res;
+      } catch {
+        // Fallback instantáneo
+      }
     }
+    return generarDocumentacionExperta(perfilEmpresa, licitacion);
   },
 
   async generarPreguntasForo(perfilEmpresa, licitacion) {
     return generarPreguntasForoExpertas(perfilEmpresa, licitacion);
-  },
-
-  async generateResponse(prompt, provider = 'best') {
-    if ((provider === 'best' || provider === 'both' || provider === 'claude') && claudeClient) {
-      return await this.generateWithClaude(prompt);
-    }
-    if ((provider === 'best' || provider === 'both' || provider === 'ollama') && ollamaClient) {
-      return await this.generateWithOllama(prompt);
-    }
-    throw new Error('Usando motor analítico integrado');
   },
 
   async generateWithClaude(prompt) {
@@ -332,28 +327,11 @@ Responde estrictamente en JSON con la estructura:
     return JSON.parse(responseText);
   },
 
-  async generateWithOllama(prompt) {
-    const list = await ollamaClient.list();
-    const modelName = list.models?.[0]?.name || 'llama3';
-    const response = await ollamaClient.generate({
-      model: modelName,
-      prompt,
-      stream: false,
-      format: 'json'
-    });
-    return JSON.parse(response.response);
-  },
-
   async checkAvailability() {
-    const availability = { claude: Boolean(claudeClient), ollama: false, motorIntegrado: true };
-    if (ollamaClient) {
-      try {
-        await ollamaClient.list();
-        availability.ollama = true;
-      } catch {
-        availability.ollama = false;
-      }
-    }
-    return availability;
+    return {
+      claude: Boolean(claudeClient),
+      ollama: Boolean(ollamaClient),
+      motorIntegrado: true
+    };
   }
 };

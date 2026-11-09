@@ -1,5 +1,5 @@
 import express from 'express';
-import { query } from '../db/database.js';
+import { FiltroBusqueda } from '../db/sequelize.js';
 
 const router = express.Router();
 
@@ -9,15 +9,17 @@ router.post('/:usuarioId', async (req, res) => {
     const { usuarioId } = req.params;
     const { nombreFiltro, proveedor, region, fechaInicio, fechaFin, estadoLicitacion } = req.body;
 
-    const result = await query(
-      `INSERT INTO filtros_busqueda
-       (usuario_id, nombre_filtro, proveedor, region, fecha_inicio, fecha_fin, estado_licitacion)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
-      [usuarioId, nombreFiltro, proveedor, region, fechaInicio, fechaFin, estadoLicitacion]
-    );
+    const filtro = await FiltroBusqueda.create({
+      usuarioId,
+      nombreFiltro,
+      proveedor,
+      region,
+      fechaInicio,
+      fechaFin,
+      estadoLicitacion
+    });
 
-    res.json(result.rows[0]);
+    res.json(filtro);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -28,14 +30,12 @@ router.get('/:usuarioId', async (req, res) => {
   try {
     const { usuarioId } = req.params;
 
-    const result = await query(
-      `SELECT * FROM filtros_busqueda 
-       WHERE usuario_id = $1 
-       ORDER BY creado_en DESC`,
-      [usuarioId]
-    );
+    const filtros = await FiltroBusqueda.findAll({
+      where: { usuarioId },
+      order: [['createdAt', 'DESC']]
+    });
 
-    res.json(result.rows);
+    res.json(filtros);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -46,15 +46,12 @@ router.delete('/:filtroId', async (req, res) => {
   try {
     const { filtroId } = req.params;
 
-    const result = await query(
-      'DELETE FROM filtros_busqueda WHERE id = $1 RETURNING *',
-      [filtroId]
-    );
-
-    if (result.rows.length === 0) {
+    const filtro = await FiltroBusqueda.findByPk(filtroId);
+    if (!filtro) {
       return res.status(404).json({ error: 'Filtro no encontrado' });
     }
 
+    await filtro.destroy();
     res.json({ message: 'Filtro eliminado' });
   } catch (error) {
     res.status(500).json({ error: error.message });

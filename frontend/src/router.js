@@ -1,40 +1,45 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { defineAsyncComponent } from 'vue'
-
-const Login = defineAsyncComponent(() => import('./views/Login.vue'))
-const Dashboard = defineAsyncComponent(() => import('./views/Dashboard.vue'))
-const Licitaciones = defineAsyncComponent(() => import('./views/Licitaciones.vue'))
-const PerfilEmpresa = defineAsyncComponent(() => import('./views/PerfilEmpresa.vue'))
-const DetalleLicitacion = defineAsyncComponent(() => import('./views/DetalleLicitacion.vue'))
 
 const routes = [
   {
     path: '/login',
     name: 'Login',
-    component: Login
+    component: () => import('./views/Login.vue')
   },
   {
     path: '/',
     name: 'Dashboard',
-    component: Dashboard,
+    component: () => import('./views/Dashboard.vue'),
     meta: { requiresAuth: true }
   },
   {
     path: '/licitaciones',
     name: 'Licitaciones',
-    component: Licitaciones,
+    component: () => import('./views/Licitaciones.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/compras-agiles',
+    name: 'ComprasAgiles',
+    component: () => import('./views/ComprasAgiles.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/postulaciones',
+    name: 'Postulaciones',
+    component: () => import('./views/Postulaciones.vue'),
     meta: { requiresAuth: true }
   },
   {
     path: '/licitaciones/:codigo',
     name: 'DetalleLicitacion',
-    component: DetalleLicitacion,
+    component: () => import('./views/DetalleLicitacion.vue'),
     meta: { requiresAuth: true }
   },
   {
     path: '/perfil',
     name: 'PerfilEmpresa',
-    component: PerfilEmpresa,
+    component: () => import('./views/PerfilEmpresa.vue'),
     meta: { requiresAuth: true }
   }
 ]

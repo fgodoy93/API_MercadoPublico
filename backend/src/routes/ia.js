@@ -7,7 +7,6 @@ const router = express.Router();
 router.post('/analizar-match', async (req, res) => {
   try {
     const { perfilEmpresa, licitacion, provider } = req.body;
-    
     const resultado = await iaService.analizarMatch(perfilEmpresa, licitacion, provider);
     res.json(resultado);
   } catch (error) {
@@ -19,7 +18,6 @@ router.post('/analizar-match', async (req, res) => {
 router.post('/resumen', async (req, res) => {
   try {
     const { licitacion, provider } = req.body;
-    
     const resumen = await iaService.generarResumenLicitacion(licitacion, provider);
     res.json(resumen);
   } catch (error) {
@@ -27,17 +25,27 @@ router.post('/resumen', async (req, res) => {
   }
 });
 
-// Generar documentación
+// Generar documentación y borrador de propuesta técnica
 router.post('/documentacion', async (req, res) => {
   try {
     const { perfilEmpresa, licitacion, provider } = req.body;
-    
     const documentacion = await iaService.generarDocumentacionPostulacion(
-      perfilEmpresa, 
-      licitacion, 
+      perfilEmpresa,
+      licitacion,
       provider
     );
     res.json(documentacion);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Generar preguntas estratégicas para el foro de la licitación
+router.post('/preguntas-foro', async (req, res) => {
+  try {
+    const { perfilEmpresa, licitacion } = req.body;
+    const resultado = await iaService.generarPreguntasForo(perfilEmpresa, licitacion);
+    res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

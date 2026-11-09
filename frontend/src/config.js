@@ -1,7 +1,7 @@
 // Archivo de configuración para desarrollo local
 // Este archivo contiene constantes y configuración útil
 
-export const API_BASE_URL = 'http://localhost:3001'
+export const API_BASE_URL = '/api'
 export const FRONTEND_URL = 'http://localhost:5173'
 
 // Estados de licitaciones

@@ -1,7 +1,7 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { query } from '../db/database.js';
+import { Usuario } from '../db/sequelize.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -19,8 +19,8 @@ router.post('/registro', async (req, res) => {
     }
 
     // Verificar si usuario ya existe
-    const existing = await query('SELECT id FROM usuarios WHERE email = $1', [email]);
-    if (existing.rows.length > 0) {
+    const existing = await Usuario.findOne({ where: { email } });
+    if (existing) {
       return res.status(400).json({ error: 'El email ya está registrado' });
     }
 
@@ -28,21 +28,26 @@ router.post('/registro', async (req, res) => {
     const hashedPassword = await bcrypt.hash(contrasena, 10);
 
     // Crear usuario
-    const result = await query(
-      `INSERT INTO usuarios (email, nombre, contrasena)
-       VALUES ($1, $2, $3)
-       RETURNING id, email, nombre`,
-      [email, nombre, hashedPassword]
-    );
+    const usuario = await Usuario.create({
+      email,
+      nombre,
+      contrasena: hashedPassword
+    });
 
-    const usuario = result.rows[0];
     const token = jwt.sign(
       { id: usuario.id, email: usuario.email },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRY }
+      process.env.JWT_SECRET || 'secreto_default',
+      { expiresIn: process.env.JWT_EXPIRY || '7d' }
     );
 
-    res.json({ usuario, token });
+    res.json({
+      usuario: {
+        id: usuario.id,
+        email: usuario.email,
+        nombre: usuario.nombre
+      },
+      token
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -58,12 +63,10 @@ router.post('/login', async (req, res) => {
     }
 
     // Buscar usuario
-    const result = await query('SELECT * FROM usuarios WHERE email = $1', [email]);
-    if (result.rows.length === 0) {
+    const usuario = await Usuario.findOne({ where: { email } });
+    if (!usuario) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
-
-    const usuario = result.rows[0];
 
     // Verificar contraseña
     const passwordMatch = await bcrypt.compare(contrasena, usuario.contrasena);
@@ -74,12 +77,16 @@ router.post('/login', async (req, res) => {
     // Generar token
     const token = jwt.sign(
       { id: usuario.id, email: usuario.email },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRY }
+      process.env.JWT_SECRET || 'secreto_default',
+      { expiresIn: process.env.JWT_EXPIRY || '7d' }
     );
 
     res.json({
-      usuario: { id: usuario.id, email: usuario.email, nombre: usuario.nombre },
+      usuario: {
+        id: usuario.id,
+        email: usuario.email,
+        nombre: usuario.nombre
+      },
       token
     });
   } catch (error) {

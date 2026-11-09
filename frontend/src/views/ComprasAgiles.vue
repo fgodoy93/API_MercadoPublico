@@ -312,10 +312,20 @@
 
                   <button
                     v-if="perfil"
+                    type="button"
                     @click="analizarMatch(item)"
-                    class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold py-2 px-3.5 rounded-xl transition"
+                    :disabled="calculandoMatch[item.CodigoExterno]"
+                    class="text-xs font-extrabold py-2 px-3.5 rounded-xl transition flex items-center gap-1"
+                    :class="matchesTarjeta[item.CodigoExterno]
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      : 'bg-purple-600 hover:bg-purple-700 text-white'"
                   >
-                    🤖 Match IA
+                    <span>🤖</span>
+                    <span v-if="calculandoMatch[item.CodigoExterno]">⏳...</span>
+                    <span v-else-if="matchesTarjeta[item.CodigoExterno]">
+                      {{ matchesTarjeta[item.CodigoExterno].nivelMatch }}% Match IA {{ mostrarPanelMatch[item.CodigoExterno] ? '▲' : '▼' }}
+                    </span>
+                    <span v-else>Match IA</span>
                   </button>
 
                   <button
@@ -324,6 +334,29 @@
                   >
                     <span>📋</span> Ver Ítems y Cotizar
                   </button>
+                </div>
+              </div>
+
+              <!-- Panel Inline de Match IA en Compras Ágiles -->
+              <div
+                v-if="matchesTarjeta[item.CodigoExterno] && mostrarPanelMatch[item.CodigoExterno]"
+                class="mt-3 bg-slate-900 text-white rounded-xl p-3.5 text-xs border border-purple-500/40"
+              >
+                <div class="flex items-center justify-between pb-2 border-b border-slate-700">
+                  <span class="font-extrabold text-emerald-400">
+                    🎯 {{ matchesTarjeta[item.CodigoExterno].nivelMatch }}% Compatibilidad con {{ perfil?.nombreEmpresa }}
+                  </span>
+                  <button type="button" @click="mostrarPanelMatch[item.CodigoExterno] = false" class="text-slate-400 hover:text-white">✕</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                  <div>
+                    <span class="text-[10px] uppercase font-bold text-emerald-300 block">✅ Fortalezas:</span>
+                    <p v-for="(f, idx) in (matchesTarjeta[item.CodigoExterno].fortalezas || []).slice(0, 2)" :key="idx" class="text-slate-200">• {{ f }}</p>
+                  </div>
+                  <div>
+                    <span class="text-[10px] uppercase font-bold text-amber-300 block">💡 Recomendación:</span>
+                    <p v-for="(r, idx) in (matchesTarjeta[item.CodigoExterno].recomendaciones || []).slice(0, 2)" :key="idx" class="text-slate-200">• {{ r }}</p>
+                  </div>
                 </div>
               </div>
               </div>
@@ -378,19 +411,24 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLicitacionesStore } from '../stores/licitacionesStore'
 import { usePerfilStore } from '../stores/perfilStore'
 import { useAuthStore } from '../stores/authStore'
+import { useIaStore } from '../stores/iaStore'
 
 const router = useRouter()
 const licitacionesStore = useLicitacionesStore()
 const perfilStore = usePerfilStore()
 const authStore = useAuthStore()
+const iaStore = useIaStore()
 
 const cargandoLote = ref(false)
 const mostrarSidebarMovil = ref(false)
+const matchesTarjeta = reactive({})
+const mostrarPanelMatch = reactive({})
+const calculandoMatch = reactive({})
 
 const modalidades = [
   { id: 'todas', label: '⚡ Todas (< 100 UTM / ~$6,6M)' },
@@ -479,10 +517,9 @@ const enriquecerPagina = async () => {
   try {
     const codigos = licitacionesStore.comprasAgiles
       .filter(i => !i.DetalleEnriquecido)
-      .slice(0, 8)
       .map(i => i.CodigoExterno)
-    if (codigos.length > 0) {
-      await licitacionesStore.enriquecerLote(codigos)
+    for (let i = 0; i < codigos.length; i += 4) {
+      await licitacionesStore.enriquecerLote(codigos.slice(i, i + 4))
     }
   } finally {
     cargandoLote.value = false
@@ -497,13 +534,31 @@ const verDetalle = (licitacion) => {
   })
 }
 
-const analizarMatch = (licitacion) => {
-  router.push({
-    name: 'DetalleLicitacion',
-    params: { codigo: licitacion.CodigoExterno },
-    state: { licitacion, analizarMatch: true }
-  })
+const analizarMatch = async (licitacion) => {
+  const codigo = licitacion.CodigoExterno
+  if (matchesTarjeta[codigo]) {
+    mostrarPanelMatch[codigo] = !mostrarPanelMatch[codigo]
+    return
+  }
+  calculandoMatch[codigo] = true
+  try {
+    const res = await iaStore.analizarMatch(perfil.value || {}, licitacion)
+    const pb = res.puntosBlind || res
+    matchesTarjeta[codigo] = {
+      nivelMatch: res.nivelMatch ?? pb.nivelMatch ?? 75,
+      fortalezas: pb.fortalezas || ['Compatible con el giro de tu empresa'],
+      recomendaciones: pb.recomendaciones || ['Revisar ítems solicitados y enviar cotización rápida']
+    }
+    mostrarPanelMatch[codigo] = true
+  } finally {
+    calculandoMatch[codigo] = false
+  }
 }
+
+watch(() => perfil.value?.id, () => {
+  Object.keys(matchesTarjeta).forEach(k => delete matchesTarjeta[k])
+  Object.keys(mostrarPanelMatch).forEach(k => delete mostrarPanelMatch[k])
+})
 
 const formatCurrency = (valor, moneda = 'CLP') => {
   if (!valor) return 'No informado'

@@ -381,7 +381,7 @@ export const mercadoPublicoService = {
 
   // Enriquecer un lote de códigos en segundo plano o bajo demanda
   async enriquecerLote(codigos = []) {
-    const unicos = [...new Set(codigos)].slice(0, 15);
+    const unicos = [...new Set(codigos)].slice(0, 30);
     const existentes = await obtenerCachesDesdeDB(unicos);
     const resultados = {};
 

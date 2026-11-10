@@ -27,7 +27,7 @@ export const useLicitacionesStore = defineStore('licitaciones', {
       precioMin: null,
       precioMax: null,
       soloCierreProximo: false,
-      ordenarPor: 'cierre_asc',
+      ordenarPor: 'recientes_desc',
       pagina: 1,
       porPagina: 24
     }

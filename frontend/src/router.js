@@ -8,14 +8,15 @@ const routes = [
   },
   {
     path: '/',
-    name: 'Dashboard',
-    component: () => import('./views/Dashboard.vue'),
+    name: 'Licitaciones',
+    alias: '/licitaciones',
+    component: () => import('./views/Licitaciones.vue'),
     meta: { requiresAuth: true }
   },
   {
-    path: '/licitaciones',
-    name: 'Licitaciones',
-    component: () => import('./views/Licitaciones.vue'),
+    path: '/recomendadas',
+    name: 'Dashboard',
+    component: () => import('./views/Dashboard.vue'),
     meta: { requiresAuth: true }
   },
   {

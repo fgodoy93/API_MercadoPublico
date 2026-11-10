@@ -248,6 +248,63 @@ function calcularDiasRestantes(fechaCierre) {
   return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 }
 
+// ===== Mapa de fechas de publicación (para ordenar "Más nuevas primero" como Mercado Público) =====
+// El listado 'activas' no trae FechaPublicacion; la reconstruimos consultando
+// licitaciones.json?fecha=DDMMYYYY&estado=publicada de los últimos N días.
+const DIAS_MAPA_PUBLICACION = 14;
+const publicacionMap = new Map(); // CodigoExterno -> 'YYYY-MM-DD'
+const diasMapaCargados = new Map(); // 'DDMMYYYY' -> timestamp de carga
+let mapaPublicacionEnCurso = null;
+
+function fechaDiaOffset(offset) {
+  const d = new Date();
+  d.setDate(d.getDate() - offset);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return { ddmmyyyy: `${dd}${mm}${yyyy}`, iso: `${yyyy}-${mm}-${dd}` };
+}
+
+async function cargarDiaPublicacion(offset) {
+  const { ddmmyyyy, iso } = fechaDiaOffset(offset);
+  const ttl = offset === 0 ? 10 * 60 * 1000 : 12 * 60 * 60 * 1000;
+  const cargado = diasMapaCargados.get(ddmmyyyy);
+  if (cargado && Date.now() - cargado < ttl) return;
+  const data = await fetchWithRetry(`${API_URL}/licitaciones.json`, { ticket: TICKET, fecha: ddmmyyyy, estado: 'publicada' }, 4);
+  for (const item of data?.Listado || []) {
+    const prev = publicacionMap.get(item.CodigoExterno);
+    // Conservar la fecha más antigua (la de publicación real)
+    if (!prev || iso < prev) publicacionMap.set(item.CodigoExterno, iso);
+  }
+  diasMapaCargados.set(ddmmyyyy, Date.now());
+}
+
+// Carga hoy de forma bloqueante (rápido) y el resto de días en segundo plano
+async function asegurarMapaPublicacion() {
+  try {
+    await cargarDiaPublicacion(0);
+  } catch (e) {
+    console.warn('No se pudo cargar publicaciones de hoy:', e.message);
+  }
+  if (!mapaPublicacionEnCurso) {
+    mapaPublicacionEnCurso = (async () => {
+      for (let i = 1; i < DIAS_MAPA_PUBLICACION; i++) {
+        try {
+          await sleep(1500);
+          await cargarDiaPublicacion(i);
+        } catch (e) {
+          console.warn(`Mapa publicación día -${i}:`, e.message);
+        }
+      }
+    })().finally(() => { mapaPublicacionEnCurso = null; });
+  }
+}
+
+function fechaPublicacionDe(item) {
+  if (item.FechaPublicacion) return String(item.FechaPublicacion).slice(0, 10);
+  return publicacionMap.get(item.CodigoExterno) || '';
+}
+
 function getCacheKey(estado, fecha) {
   return `${estado || 'activas'}_${fecha || 'all'}`;
 }
@@ -648,7 +705,7 @@ export const mercadoPublicoService = {
     palabrasClave = [],
     palabrasExcluidas = '',
     soloCierreProximo = false,
-    ordenarPor = 'cierre_asc',
+    ordenarPor = 'recientes_desc',
     pagina = 1,
     porPagina = 24,
     enriquecerPagina = true
@@ -777,7 +834,23 @@ export const mercadoPublicoService = {
     }
 
     // 6. Ordenamiento
+    if (ordenarPor === 'recientes_desc') {
+      await asegurarMapaPublicacion();
+      listado = listado.map(item => {
+        const fp = fechaPublicacionDe(item);
+        return fp && !item.FechaPublicacion ? { ...item, FechaPublicacion: fp } : item;
+      });
+    }
     listado.sort((a, b) => {
+      if (ordenarPor === 'recientes_desc') {
+        const pa = fechaPublicacionDe(a);
+        const pb = fechaPublicacionDe(b);
+        if (pa !== pb) return pa < pb ? 1 : -1; // más nueva primero; sin fecha al final
+        // Desempate: la de cierre más lejano suele ser la más recién publicada
+        const ca = a.FechaCierre ? new Date(a.FechaCierre).getTime() : 0;
+        const cb = b.FechaCierre ? new Date(b.FechaCierre).getTime() : 0;
+        return cb - ca;
+      }
       if (ordenarPor === 'cierre_asc') {
         const da = a.FechaCierre ? new Date(a.FechaCierre).getTime() : Infinity;
         const db = b.FechaCierre ? new Date(b.FechaCierre).getTime() : Infinity;

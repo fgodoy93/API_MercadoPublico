@@ -79,19 +79,19 @@
               class="flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-900 transition"
             >
               <span class="flex items-center gap-2.5">
-                <span class="text-sm">🎯</span>
-                <span>Radar & Recomendadas</span>
+                <span class="text-sm">🌐</span>
+                <span>Todas las Licitaciones</span>
               </span>
             </router-link>
 
             <router-link
-              to="/licitaciones"
+              to="/recomendadas"
               active-class="bg-blue-600/15 text-blue-400 border-l-2 border-blue-500 font-bold"
               class="flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-900 transition"
             >
               <span class="flex items-center gap-2.5">
-                <span class="text-sm">🔎</span>
-                <span>Buscador Nacional</span>
+                <span class="text-sm">🎯</span>
+                <span>Recomendadas por Rubro</span>
               </span>
             </router-link>
 
@@ -242,8 +242,8 @@
         v-if="usuario"
         class="lg:hidden flex items-center justify-around bg-slate-900 text-slate-300 px-2 py-2 border-b border-slate-800 text-xs overflow-x-auto"
       >
-        <router-link to="/" exact-active-class="text-blue-400 font-bold" class="px-2 py-1 whitespace-nowrap">🎯 Radar</router-link>
-        <router-link to="/licitaciones" active-class="text-blue-400 font-bold" class="px-2 py-1 whitespace-nowrap">🔎 Licitaciones</router-link>
+        <router-link to="/" exact-active-class="text-blue-400 font-bold" class="px-2 py-1 whitespace-nowrap">🌐 Todas</router-link>
+        <router-link to="/recomendadas" active-class="text-blue-400 font-bold" class="px-2 py-1 whitespace-nowrap">🎯 Recomendadas</router-link>
         <router-link to="/compras-agiles" active-class="text-emerald-400 font-bold" class="px-2 py-1 whitespace-nowrap">⚡ Ágiles</router-link>
         <router-link to="/postulaciones" active-class="text-amber-400 font-bold" class="px-2 py-1 whitespace-nowrap">📋 Pipeline</router-link>
         <router-link to="/perfil" active-class="text-blue-400 font-bold" class="px-2 py-1 whitespace-nowrap">🏢 Empresas</router-link>

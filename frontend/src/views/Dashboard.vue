@@ -1,5 +1,6 @@
 <template>
   <div class="space-y-6">
+    <VistaTabs />
     <!-- 1. Banda Ejecutiva de Contexto y Acciones Rápidas -->
     <div class="bg-white rounded-xl border border-slate-200/90 p-5 shadow-xs">
       <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -727,6 +728,7 @@ import axios from 'axios'
 import { useAuthStore } from '../stores/authStore'
 import { useLicitacionesStore } from '../stores/licitacionesStore'
 import { usePerfilStore } from '../stores/perfilStore'
+import VistaTabs from '../components/VistaTabs.vue'
 
 const authStore = useAuthStore()
 const licitacionesStore = useLicitacionesStore()

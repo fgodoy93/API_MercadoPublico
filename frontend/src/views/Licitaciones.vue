@@ -1,5 +1,6 @@
 <template>
   <div class="space-y-5">
+    <VistaTabs />
     <!-- Encabezado Compacto Superior -->
     <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-white rounded-2xl px-6 py-4 shadow-sm border border-slate-300">
       <div>
@@ -290,6 +291,7 @@
               @change="ejecutarBusqueda(1)"
               class="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none"
             >
+              <option value="recientes_desc">🆕 Más nuevas primero (como Mercado Público)</option>
               <option value="cierre_asc">⏳ Cierre más próximo primero</option>
               <option value="cierre_desc">📅 Cierre más lejano primero</option>
               <option value="monto_desc">💰 Mayor Monto Máximo</option>
@@ -674,6 +676,7 @@ import { useLicitacionesStore } from '../stores/licitacionesStore'
 import { usePerfilStore } from '../stores/perfilStore'
 import { useAuthStore } from '../stores/authStore'
 import { useIaStore } from '../stores/iaStore'
+import VistaTabs from '../components/VistaTabs.vue'
 
 const router = useRouter()
 const licitacionesStore = useLicitacionesStore()
@@ -713,7 +716,7 @@ const filtros = ref({
   precioMin: null,
   precioMax: null,
   soloCierreProximo: false,
-  ordenarPor: 'cierre_asc',
+  ordenarPor: 'recientes_desc',
   pagina: 1,
   porPagina: 20
 })
@@ -796,7 +799,7 @@ const limpiar = async () => {
     precioMin: null,
     precioMax: null,
     soloCierreProximo: false,
-    ordenarPor: 'cierre_asc',
+    ordenarPor: 'recientes_desc',
     pagina: 1,
     porPagina: 20
   }
